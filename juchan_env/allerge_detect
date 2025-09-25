@@ -45,10 +45,29 @@ print(df["레시피명"])
 food = str(input("음식명 입력: "))
 allergy = str(input("알레르기 재료 입력: "))
 
-# 동의어 사전 (추가 가능)
+# 알레르기 동의어 사전
 allergy_dict = {
-    "새우": ["새우", "새우살", "대게", "칵테일 새우"],
-    "계란": ["계란", "달걀", "에그"],
+    "계란": ["계란", "달걀", "에그", "난백", "난황", "egg"],
+    "우유": ["우유", "밀크", "버터", "치즈", "요거트", "분유", "milk"],
+    "밀": ["밀", "밀가루", "소맥", "wheat", "글루텐"],
+    "갑각류": ["새우", "새우살", "대하", "대게", "꽃게", "킹크랩", "랍스터", "게", "crab", "shrimp", "lobster"],
+    "생선": ["생선", "어류", "고등어", "연어", "참치", "삼치", "fish", "mackerel", "salmon", "tuna"],
+    "호두": ["호두", "walnut"],
+    "돼지고기": ["돼지고기", "돼지", "돈육", "pork"],
+    "땅콩": ["땅콩", "peanut"],
+    "조개": ["조개", "홍합", "바지락", "굴", "가리비", "clam", "mussel", "scallop", "oyster"],
+    "복숭아": ["복숭아", "peach"],
+    "콩": ["콩", "대두", "두유", "soybean", "soy"],
+    "사과": ["사과", "apple"],
+    "닭고기": ["닭고기", "닭", "치킨", "계육", "chicken"],
+    "메밀": ["메밀", "buckwheat"],
+    "쇠고기": ["쇠고기", "소고기", "소", "beef"],
+    "키위": ["키위", "kiwi"],
+    "아몬드": ["아몬드", "almond"],
+    "들깨": ["들깨", "perilla", "perilla seed"],
+    "토마토": ["토마토", "tomato"],
+    "오징어": ["오징어", "squid"],
+    # 필요하면 추가하세요
 }
 
 def fuzzy_search_rapidfuzz(df, query, topn=5):
@@ -57,7 +76,7 @@ def fuzzy_search_rapidfuzz(df, query, topn=5):
     out = [{"레시피명": m[0], "점수(0~100)": m[1]} for m in results]
     return pd.DataFrame(out)
 
-# 검색
+# 레시피 검색
 high_possible_result = fuzzy_search_rapidfuzz(df, food, topn=5)
 print(high_possible_result)
 
@@ -66,22 +85,19 @@ if not high_possible_result.empty:
     result_ing = df.loc[df["레시피명"] == recipe_name, "재료정보"]
 
     if not result_ing.empty:
-        ingredients = result_ing.iloc[0].split(",")  # 콤마 기준 분리
-        ingredients = [i.strip() for i in ingredients]
-
+        # 콤마 기준으로 나눠서 리스트화
+        ingredients = [i.strip() for i in result_ing.iloc[0].split(",")]
         print("재료 목록:", ingredients)
 
-        # 동의어 확장
+        # 알레르기 동의어 목록 가져오기
         allergy_list = allergy_dict.get(allergy, [allergy])
 
         # 검사
-        found = False
-        for ing in ingredients:
-            if any(a in ing for a in allergy_list):
-                print(f"⚠️ 알레르기 재료 발견: {ing} → 먹지마세요!")
-                found = True
+        found = [ing for ing in ingredients if any(a in ing for a in allergy_list)]
 
-        if not found:
+        if found:
+            print(f"⚠️ 알레르기 재료 발견: {found} → 먹지마세요!")
+        else:
             print("안전합니다 👍")
     else:
         print("해당 레시피에 재료정보가 없습니다.")
