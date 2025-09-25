@@ -1,0 +1,89 @@
+import requests
+import xml.etree.ElementTree as ET
+import pandas as pd
+from rapidfuzz import process, fuzz
+
+MY_API_KEY_FOOD = "d96a60713f474e4596e6" #제가 받은 키입니다.
+url_food = "http://openapi.foodsafetykorea.go.kr/api/d96a60713f474e4596e6/COOKRCP01/xml/1/999"
+#url_food += f"?ServiceKey={MY_API_KEY_FOOD}"
+
+response = requests.get(url_food)
+
+# 정상적으로 가져왔는지 확인
+if response.status_code == 200:
+    # xml 내용을 파일로 저장
+    with open("output.xml", "wb") as f:   # "wb"는 바이너리 모드
+        f.write(response.content)
+    print("XML 파일 저장 완료: output.xml")
+else:
+    print("데이터를 가져오지 못했습니다. 상태 코드:", response.status_code)
+
+
+
+root = ET.fromstring(response.content)   # XML 파싱
+print(root.tag, root.attrib)
+
+data = []
+for row in root.iter("row"):
+    item = {
+        "레시피번호": row.find("RCP_SEQ").text,
+        "레시피명": row.find("RCP_NM").text,
+        "재료정보": row.find("RCP_PARTS_DTLS").text
+    }
+    data.append(item)
+
+df = pd.DataFrame(data)
+
+pd.set_option("display.max_rows", None)
+
+
+pd.set_option("display.max_rows", None)
+print(df["레시피명"])
+
+
+# 유저 입력
+food = str(input("음식명 입력: "))
+allergy = str(input("알레르기 재료 입력: "))
+
+# 동의어 사전 (추가 가능)
+allergy_dict = {
+    "새우": ["새우", "새우살", "대게", "칵테일 새우"],
+    "계란": ["계란", "달걀", "에그"],
+}
+
+def fuzzy_search_rapidfuzz(df, query, topn=5):
+    names = df["레시피명"].astype(str).tolist()
+    results = process.extract(query, names, scorer=fuzz.WRatio, limit=topn)
+    out = [{"레시피명": m[0], "점수(0~100)": m[1]} for m in results]
+    return pd.DataFrame(out)
+
+# 검색
+high_possible_result = fuzzy_search_rapidfuzz(df, food, topn=5)
+print(high_possible_result)
+
+if not high_possible_result.empty:
+    recipe_name = high_possible_result.iloc[0]["레시피명"]  # 가장 높은 후보
+    result_ing = df.loc[df["레시피명"] == recipe_name, "재료정보"]
+
+    if not result_ing.empty:
+        ingredients = result_ing.iloc[0].split(",")  # 콤마 기준 분리
+        ingredients = [i.strip() for i in ingredients]
+
+        print("재료 목록:", ingredients)
+
+        # 동의어 확장
+        allergy_list = allergy_dict.get(allergy, [allergy])
+
+        # 검사
+        found = False
+        for ing in ingredients:
+            if any(a in ing for a in allergy_list):
+                print(f"⚠️ 알레르기 재료 발견: {ing} → 먹지마세요!")
+                found = True
+
+        if not found:
+            print("안전합니다 👍")
+    else:
+        print("해당 레시피에 재료정보가 없습니다.")
+else:
+    print("유사한 레시피를 찾지 못했습니다.")
