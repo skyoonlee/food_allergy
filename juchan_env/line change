@@ -1,0 +1,63 @@
+# 알러지 유발 음식 추출
+import requests
+import xml.etree.ElementTree as ET
+
+# 알레르기 동의어 사전
+allergy_dict = {
+    "계란": ["계란", "달걀", "에그", "난백", "난황", "egg"],
+    "우유": ["우유", "밀크", "버터", "치즈", "요거트", "분유", "milk"],
+    "밀": ["밀", "밀가루", "소맥", "wheat", "글루텐","햄버거","라면","빵"],
+    "갑각류": ["새우", "새우살", "대하", "대게", "꽃게", "킹크랩", "랍스터", "게", "crab", "shrimp", "lobster"],
+    "생선": ["생선", "어류", "고등어", "연어", "참치", "삼치", "fish", "mackerel", "salmon", "tuna","북어","황태"],
+    "돼지고기": ["돼지고기", "돼지", "돈육", "pork"],
+    "견과류": ["땅콩", "peanut","호두", "walnut","콩", "대두", "두유", "soybean", "soy","잣"],
+    "조개": ["조개", "홍합", "바지락", "굴", "가리비", "clam", "mussel", "scallop", "oyster"],
+    "복숭아": ["복숭아", "peach"],
+    "콩": ["콩", "대두", "두유", "soybean", "soy"],
+    "사과": ["사과", "apple"],
+    "닭고기": ["닭고기", "닭", "치킨", "계육", "chicken"],
+    "메밀": ["메밀", "buckwheat"],
+    "쇠고기": ["쇠고기", "소고기", "소", "beef"],
+    "키위": ["키위", "kiwi"],
+    "아몬드": ["아몬드", "almond"],
+    "들깨": ["들깨", "perilla", "perilla seed"],
+    "토마토": ["토마토", "tomato","케첩"],
+    "오징어": ["오징어", "squid"],
+    # 필요하면 추가하세요
+}
+
+MY_API_KEY_FOOD = "d96a60713f474e4596e6" #제가 받은 키입니다.
+
+# XML URL 예시 (실제 URL로 바꿔주세요)
+url_food = "http://openapi.foodsafetykorea.go.kr/api/d96a60713f474e4596e6/COOKRCP01/xml/1/999"
+
+# XML 다운로드 & 파싱
+response = requests.get(url_food)
+response.encoding = "utf-8"  # 인코딩 맞춰야 한글 안 깨짐
+root = ET.fromstring(response.text)
+
+# 정상적으로 가져왔는지 확인
+if response.status_code == 200:
+    print("ok")
+# 알레르기 유발 음식명 추출
+allergy_foods = []
+
+# XML 구조에 따라 tag 이름 조정 필요
+# 예시: <row><RECIPE_NM_KO>김치볶음밥</RECIPE_NM_KO><IRDNT_NM>밥, 계란, 새우살</IRDNT_NM></row>
+for row in root.findall(".//row"):
+    recipe_name = row.findtext("RCP_NM")  # 음식명
+    ingredients = row.findtext("RCP_PARTS_DTLS")      # 재료정보
+    
+    if not ingredients:
+        continue
+    
+    # 콤마로 나눠 재료 리스트화
+    ing_list = [i.strip() for i in ingredients.split(",")]
+
+    # 알러지 포함 여부 검사
+    for key, synonyms in allergy_dict.items():
+        if any(any(syn in ing for syn in synonyms) for ing in ing_list):
+            allergy_foods.append(recipe_name)
+            break  # 하나라도 걸리면 그 음식은 알러지 음식
+
+print("⚠️ 알러지 유발 음식:", allergy_foods, sep=",")
