@@ -26,19 +26,10 @@ allergy_dict = {
     # 필요하면 추가하세요
 }
 
-MY_API_KEY_FOOD = "d96a60713f474e4596e6" #제가 받은 키입니다.
+# ✅ 로컬 XML 파일 불러오기
+tree = ET.parse("api_xml.xml")  # 같은 폴더 안에 있는 recipes.xml
+root = tree.getroot()
 
-# XML URL 예시 (실제 URL로 바꿔주세요)
-url_food = "http://openapi.foodsafetykorea.go.kr/api/d96a60713f474e4596e6/COOKRCP01/xml/1/999"
-
-# XML 다운로드 & 파싱
-response = requests.get(url_food)
-response.encoding = "utf-8"  # 인코딩 맞춰야 한글 안 깨짐
-root = ET.fromstring(response.text)
-
-# 정상적으로 가져왔는지 확인
-if response.status_code == 200:
-    print("ok")
 # 알레르기 유발 음식명 추출
 allergy_foods = []
 
@@ -60,4 +51,4 @@ for row in root.findall(".//row"):
             allergy_foods.append(recipe_name)
             break  # 하나라도 걸리면 그 음식은 알러지 음식
 
-print("⚠️ 알러지 유발 음식:", allergy_foods, sep=",")
+print("⚠️ 알러지 유발 음식:", allergy_foods, sep="\n")
