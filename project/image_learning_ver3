@@ -278,7 +278,10 @@ timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 model_name = f"food_allergy_model_{folder_name}_{timestamp}"
 # 파일명에 사용할 수 없는 문자 제거
 model_name = "".join([c for c in model_name if c.isalpha() or c.isdigit() or c in ['_', '-']])
-torch.save(model, f'{model_name}.pt')
+torch.save(
+    {"model_state_dict": model.state_dict(), "img_size": 224},
+    "best_model.pt"
+)
 print(f" 추가 학습 완료! 새로운 모델이 '{model_name}.pt'로 저장되었어요!")
 
 # 9. 모델 테스트 (간단하게)
