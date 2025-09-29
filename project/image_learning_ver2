@@ -111,13 +111,43 @@ except Exception as e: # 그 외 모든 오류
 
 
 # 5. 학습 설정 (동일)
-device = torch.device("cuda" if torch.cuda_ok() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.00001)  # 아주 낮은 학습률로 파인튜닝하는 게 좋아요! (0.0001 -> 0.00001)
+optimizer = optim.Adam(model.parameters(), lr=0.00001)  # 아주 낮은 학습률로 파인튜닝
 
 # 6. 추가 학습 함수 (동일)
-# ...
+def train_model(model, dataloader, criterion, optimizer, num_epochs=5):
+    model.train()
+    
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            # 기울기 초기화
+            optimizer.zero_grad()
+            
+            # 순전파 + 역전파 + 최적화
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            # 통계
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        
+        epoch_loss = running_loss / len(dataloader)
+        epoch_acc = 100 * correct / total
+        print(f'에폭 {epoch+1}/{num_epochs} | 손실: {epoch_loss:.4f} | 정확도: {epoch_acc:.2f}%')
+    
+    return model
 
 # 7. 모델 추가 학습 시작
 print("🚀 김치찌개가 포함된 전체 데이터로 추가 학습 시작!")
@@ -129,8 +159,91 @@ torch.save(model, 'food_allergy_model_v2_with_kimchi.pt') # 새로운 버전으�
 print("✨ 추가 학습 완료! 새로운 모델이 'food_allergy_model_v2_with_kimchi.pt'로 저장되었어요!")
 
 # 9. 모델 테스트 (간단하게)
-# ... (test_model 함수 정의) ...
+def test_model(model, dataloader):
+    model.eval()
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    accuracy = 100 * correct / total
+    print(f'테스트 정확도: {accuracy:.2f}%')
+    return accuracy
+
 test_model(model, full_dataloader) # 전체 데이터로 테스트!
+###
+# 10. 클래스별 정확도 확인하기
+def test_model_per_class(model, dataloader, classes):
+    model.eval()
+    class_correct = [0] * len(classes)
+    class_total = [0] * len(classes)
+    
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+            
+            # 클래스별 정확도 계산
+            for i in range(len(labels)):
+                label = labels[i]
+                class_total[label] += 1
+                if predicted[i] == label:
+                    class_correct[label] += 1
+    
+    # 클래스별 정확도 출력
+    print("\n🍽️ 음식 종류별 정확도:")
+    for i in range(len(classes)):
+        if class_total[i] > 0:  # 데이터가 있는 클래스만
+            accuracy = 100 * class_correct[i] / class_total[i]
+            print(f'- {classes[i]}: {accuracy:.2f}% ({class_correct[i]}/{class_total[i]})')
+        else:
+            print(f'- {classes[i]}: 테스트 데이터 없음')
+    
+    return class_correct, class_total
+
+# 클래스별 정확도 확인
+class_correct, class_total = test_model_per_class(model, full_dataloader, full_dataset.classes)
+
+# 11. 모델 사용 예시 (새 이미지로 예측하기)
+def predict_food(model, image_path, transform, classes):
+    model.eval()
+    
+    # 이미지 불러오기 및 전처리
+    image = Image.open(image_path).convert('RGB')
+    image = transform(image).unsqueeze(0).to(device)  # 배치 차원 추가
+    
+    # 예측
+    with torch.no_grad():
+        outputs = model(image)
+        _, predicted = torch.max(outputs, 1)
+        
+        # 확률 계산 (소프트맥스)
+        probs = torch.nn.functional.softmax(outputs, dim=1)[0]
+        confidence = probs[predicted.item()].item() * 100
+        
+    predicted_class = classes[predicted.item()]
+    
+    print(f"\n🔮 예측 결과: '{predicted_class}' (확신도: {confidence:.2f}%)")
+    
+    # 상위 3개 예측 결과 보여주기
+    top3_prob, top3_idx = torch.topk(probs, 3)
+    print("상위 3개 예측:")
+    for i in range(3):
+        print(f"- {classes[top3_idx[i]]}: {top3_prob[i]*100:.2f}%")
+    
+    return predicted_class, confidence
+###
+# 예시: 새로운 이미지로 예측해보기
+# 실제 테스트할 이미지 경로를 넣어주세요!
+# test_image_path = '/content/drive/MyDrive/Food_allergy/test_images/kimchi_stew_test.jpg'
+# predict_food(model, test_image_path, transform, full_dataset.classes)
 
 # 음식 이름들 각각의 모델이 아닌 하나의 통합 모델로 접근하기 위하여 수정
 # 모든 음식 카테고리를 한 번에 분류하고, 관리가 편하고, 추론시 하나의 모델만 불러오면 됨
