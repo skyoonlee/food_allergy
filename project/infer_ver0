@@ -1,0 +1,169 @@
+import matplotlib.pyplot as plt
+from torchvision.models.resnet import ResNet
+from torch.nn.modules.conv import Conv2d
+from torch.nn.modules.batchnorm import BatchNorm2d
+from torch.nn.modules.activation import ReLU
+from torch.nn.modules.pooling import MaxPool2d
+from torch.nn.modules.container import Sequential
+
+torch.serialization.add_safe_globals([
+    Conv2d, BatchNorm2d, ReLU, MaxPool2d, ResNet, Sequential
+])
+
+# 1. 모델 불러오기
+def load_model(model_path):
+    try:
+        print(f"🔍 모델 '{model_path}'를 불러오는 중...")
+        model = torch.load(model_path, map_location=torch.device('cpu'))
+        model.eval()  # 평가 모드로 설정
+        print("✅ 모델 불러오기 성공!")
+        return model
+    except Exception as e:
+        print(f"❌ 모델 로드 중 오류 발생: {e}")
+        return None
+
+# 2. 이미지 전처리 함수
+def preprocess_image(image_path):
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    image = Image.open(image_path).convert('RGB')
+    image_tensor = transform(image).unsqueeze(0)  # 배치 차원 추가
+    return image, image_tensor
+
+# 3. 이미지 예측 함수
+def predict_image(model, image_tensor, classes):
+    # 모델이 GPU에 있으면 이미지도 GPU로 이동
+    device = next(model.parameters()).device
+    image_tensor = image_tensor.to(device)
+    
+    with torch.no_grad():
+        outputs = model(image_tensor)
+        probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
+        
+        # 상위 3개 예측 결과 가져오기
+        top3_prob, top3_idx = torch.topk(probabilities, 3)
+        
+        # 최종 예측 결과
+        predicted_idx = top3_idx[0].item()
+        confidence = top3_prob[0].item() * 100
+        
+    return {
+        'predicted_class': classes[predicted_idx],
+        'confidence': confidence,
+        'top3_predictions': [(classes[idx.item()], prob.item() * 100) for idx, prob in zip(top3_idx, top3_prob)]
+    }
+
+# 4. 결과 시각화 함수 (그래프로 예쁘게 보여줌)
+def visualize_prediction(image, prediction_results):
+    plt.figure(figsize=(12, 5))
+    
+    # 원본 이미지 표시
+    plt.subplot(1, 2, 1)
+    plt.imshow(image)
+    plt.title("입력 이미지")
+    plt.axis('off')
+    
+    # 예측 결과 표시
+    plt.subplot(1, 2, 2)
+    
+    classes = [p[0] for p in prediction_results['top3_predictions']]
+    confidences = [p[1] for p in prediction_results['top3_predictions']]
+    
+    bars = plt.barh(classes, confidences, color=['gold', 'silver', 'brown'])
+    plt.xlim(0, 100)
+    plt.xlabel('확률 (%)')
+    plt.title(f"예측 결과: {prediction_results['predicted_class']} ({prediction_results['confidence']:.2f}%)")
+    
+    # 바 위에 확률값 표시
+    for bar, conf in zip(bars, confidences):
+        plt.text(bar.get_width() + 1, bar.get_y() + bar.get_height()/2, f"{conf:.2f}%", 
+                 va='center', fontsize=10)
+    
+    plt.tight_layout()
+    plt.show()
+
+# 5. 메인 함수: 이미지 테스트
+def test_food_image(model_path, image_path):
+    # 모델 경로 설정
+    if model_path is None:
+        model_path = "food_allergy_model_test_20250929_1456.pt"
+    
+    # 이미지 경로가 없으면 기본 테스트 이미지 사용
+    if image_path is None:
+        # 사용자별 업로드 경로 설정
+        upload_path = set_image_path(user_id, "food")
+        image_path = f"{upload_path}test_food.jpg"
+        print(f"⚠️ 이미지 경로가 지정되지 않아 기본 테스트 이미지를 사용합니다: {image_path}")
+    
+    # 모델 불러오기
+    model = torch.load("food_allergy_model_test_20250929_1456.pt", weights_only=False)
+    if model is None:
+        return
+    
+    # 클래스 이름 가져오기 (모델에 저장된 경우)
+    classes = []
+    if hasattr(model, 'classes'):
+        classes = model.classes
+    else:
+        # 모델에 클래스 정보가 없는 경우, 여기에 직접 클래스 이름 입력
+        # 대장님이 학습시킨 음식 클래스 이름을 넣어주세요!
+        classes = ["김치찌개", "된장찌개", "불고기", "비빔밥", "순두부찌개"]  # 예시 클래스
+        print(f"모델에 클래스 정보가 없어서 기본값을 사용합니다: {classes}")
+    
+    # 이미지 전처리
+    image, image_tensor = preprocess_image(image_path)
+    
+    # 예측
+    prediction_results = predict_image(model, image_tensor, classes)
+    
+    # 결과 출력
+    print(f"\n🔮 예측 결과: '{prediction_results['predicted_class']}' (확신도: {prediction_results['confidence']:.2f}%)")
+    print("상위 3개 예측:")
+    for i, (class_name, prob) in enumerate(prediction_results['top3_predictions']):
+        print(f"- {i+1}위: {class_name}: {prob:.2f}%")
+    
+    # 결과 시각화
+    visualize_prediction(image, prediction_results)
+    
+    return prediction_results
+
+def set_image_path(user_id=None, image_type=None):
+    
+    # 사용자별 또는 이미지 타입별로 경로를 생성합니다.
+    
+    # Args:
+    #     user_id (str): 사용자 ID (없으면 기본 경로 사용)
+    #     image_type (str): 이미지 유형 (예: "food", "allergy" 등)
+    
+    # Returns:
+    #     str: 저장 경로
+  
+    # 기본 경로 설정
+    base_path = "uploads/image"
+    
+    # 사용자별 폴더 생성
+    if user_id:
+        user_path = f"{base_path}{user_id}/"
+    else:
+        user_path = base_path
+    
+    # 이미지 타입별 하위 폴더 생성
+    if image_type:
+        final_path = f"{user_path}{image_type}/"
+    else:
+        final_path = user_path
+    
+    # 경로가 존재하지 않으면 생성
+    import os
+    os.makedirs(final_path, exist_ok=True)
+    
+    return final_path
+
+test_food_image(
+    model_path="food_allergy_model_test_20250929_1456.pt",
+    image_path=r"C:\Users\KCCISTC\Desktop\workspace\food_allergy\test\나물\나물\가지볶음\Img_040_0067.jpg"
+)
