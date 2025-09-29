@@ -89,3 +89,10 @@ except Exception as e: # 다른 오류 발생 시
     model = models.resnet18(pretrained=True)
     num_classes = len(new_dataset.classes)
     model.fc = nn.Linear(model.fc.in_features, num_classes)
+
+
+# 음식 이름들 각각의 모델이 아닌 하나의 통합 모델로 접근하기 위하여 수정
+# 모든 음식 카테고리를 한 번에 분류하고, 관리가 편하고, 추론시 하나의 모델만 불러오면 됨
+# 카테고리 간 특징을 공유하며 학습
+# 기존 러닝 모델은 FoodDataset 클래스 data_dir 바로 아래 있는 폴더들을 클래스로 인식하도록 되어 있었음
+# 그 아래 세부적인 음식 이름들을 클래스로 인식하고 학습 시키기 위해 FoodDataset 클래스 수정
