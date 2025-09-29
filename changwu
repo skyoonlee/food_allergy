@@ -1,1 +1,505 @@
+## 1. 음식명 추론 : best.pt만 있으면 추론 가능
+## 2. 음식명:재료 정보가 있는 xml이 코드와 같은 폴더에 있으면 재료 추로한 음식명을 바탕으로 재료 가져올 수 있음
+## 3. 사용자가 선택한 알러지, 입력한 재료가 해당 음식에 들어있는 지 판별가능 
 
+
+
+
+# -*- coding: utf-8 -*-
+from flask import Flask, render_template_string, request, jsonify, abort, url_for
+import base64, io, os, shutil
+from PIL import Image
+import torch, torch.nn as nn
+from torchvision import transforms, models
+import requests
+import xml.etree.ElementTree as ET
+import pandas as pd
+from rapidfuzz import process, fuzz
+
+# --- static 폴더 구성 (권장 방식)
+STATIC_DIR = os.path.join(os.getcwd(), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+src_logo = os.path.join(os.getcwd(), "logo.png")
+dst_logo = os.path.join(STATIC_DIR, "logo.png")
+if os.path.exists(src_logo) and not os.path.exists(dst_logo):
+    shutil.copy(src_logo, dst_logo)
+
+# Flask 앱
+app = Flask(__name__, static_folder='static', static_url_path='/static')
+
+# ===== 알러지 목록 (UI 용) =====
+ALLERGENS = [
+    ("계란", "계란/난류"), ("우유", "우유"), ("밀", "밀"),
+    ("갑각류", "갑각류"), ("생선", "생선"), ("돼지고기", "돼지고기"),
+    ("견과류", "견과류"), ("조개", "조개"), ("복숭아", "복숭아"),
+    ("콩", "콩"), ("사과", "사과"), ("닭고기", "닭고기"),
+    ("메밀", "메밀"), ("쇠고기", "쇠고기"), ("키위", "키위"),
+    ("아몬드", "아몬드"), ("들깨", "들깨"), ("토마토", "토마토"),
+    ("오징어", "오징어")
+    
+]
+ALLERGEN_MAP = {k: v for k, v in ALLERGENS}
+
+
+#################################################################################################################
+###################################알러지 별로 해당하는 재료 딕셔너리 추가############################################
+
+ALLERGEN_ING_SYNONYMS = {
+    "계란": ["계란", "달걀", "에그", "난백", "난황", "egg"],
+    "우유": ["우유", "밀크", "버터", "치즈", "요거트", "분유", "milk"],
+    "밀": ["밀", "밀가루", "소맥", "wheat", "글루텐","햄버거","라면","빵"],
+    "갑각류": ["새우", "새우살", "대하", "대게", "꽃게", "킹크랩", "랍스터", "게", "crab", "shrimp", "lobster"],
+    "생선": ["생선", "어류", "고등어", "연어", "참치", "삼치", "fish", "mackerel", "salmon", "tuna","북어","황태"],
+    "돼지고기": ["돼지고기", "돼지", "돈육", "pork"],
+    "견과류": ["땅콩", "peanut","호두", "walnut","콩", "대두", "두유", "soybean", "soy","잣"],
+    "조개": ["조개", "홍합", "바지락", "굴", "가리비", "clam", "mussel", "scallop", "oyster"],
+    "복숭아": ["복숭아", "peach"],
+    "콩": ["콩", "대두", "두유", "soybean", "soy"],
+    "사과": ["사과", "apple"],
+    "닭고기": ["닭고기", "닭", "치킨", "계육", "chicken"],
+    "메밀": ["메밀", "buckwheat"],
+    "쇠고기": ["쇠고기", "소고기", "소", "beef"],
+    "키위": ["키위", "kiwi"],
+    "아몬드": ["아몬드", "almond"],
+    "들깨": ["들깨", "perilla", "perilla seed"],
+    "토마토": ["토마토", "tomato","케첩"],
+    "오징어": ["오징어", "squid"],
+    # 필요하면 추가하세요
+} 
+
+
+# ===== 모델/라벨 =====
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def load_label_map(path="label_map.txt"):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            cls = [ln.strip() for ln in f if ln.strip()]
+        if cls: return cls
+    return ["bibimbap","kimchi_stew","ramyeon","bulgogi","tteokbokki","kimbap","jajangmyeon","jjamppong"]
+
+CLASS_NAMES = load_label_map()
+NUM_CLASSES = len(CLASS_NAMES)
+
+def build_resnet18(num_classes):
+    try: model = models.resnet50(weights=None)
+    except Exception: model = models.resnet50(pretrained=False)
+    in_f = model.fc.in_features
+    model.fc = nn.Linear(in_f, num_classes)
+    return model
+
+class DummyModel(nn.Module):
+    def __init__(self, n): super().__init__(); self.n=n
+    def forward(self, x): return torch.randn(x.size(0), self.n, device=x.device)
+
+def try_load_model(n, ckpt="best_model.pt"):
+    if not os.path.exists(ckpt):
+        print("[INFO] best_model.pt 없음 → DummyModel")
+        return DummyModel(n).to(device), 224
+    ckpt_obj = torch.load(ckpt, map_location="cpu")
+    img_size = ckpt_obj.get("img_size", 224) if isinstance(ckpt_obj, dict) else 224
+    model = build_resnet18(n)
+    try:
+        state = ckpt_obj["model_state_dict"] if isinstance(ckpt_obj, dict) and "model_state_dict" in ckpt_obj else ckpt_obj
+        model.load_state_dict(state, strict=True)
+        print("[INFO] ResNet50 로드 완료")
+    except Exception as e:
+        print("[WARN] 로드 실패 → DummyModel:", e)
+        model = DummyModel(n)
+    return model.to(device), img_size
+
+MODEL, IMG_SIZE = try_load_model(NUM_CLASSES)
+
+def build_tfms(img_size=224):
+    return transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(10),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+TFMS = build_tfms(IMG_SIZE)
+MODEL.eval()
+
+# ===== 스타일 (배경 양옆 로고) =====
+BASE_CSS = """
+<style>
+  :root { --bg:#fffff0; --card:#ffffff; --text:#222; --muted:#555; --accent:#6aa3ff; }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Noto Sans KR,Helvetica,Arial;
+    position:relative; overflow-x:hidden;
+  }
+
+  /* ===== 양옆 큰 로고 배경 ===== */
+  body::before, body::after{
+    content:""; position:fixed; top:50%; transform:translateY(-50%);
+    width:min(40vw, 560px); height:min(40vw, 560px);
+    background-image:url('/static/logo.png');
+    background-size:contain; background-repeat:no-repeat; background-position:center;
+    opacity:1.0; filter:drop-shadow(0 6px 18px rgba(0,0,0,.12));
+    pointer-events:none; z-index:0;
+  }
+  /* 좌측/우측 배치 (뷰포트 좌우 3vw 지점에 고정) */
+  body::before{ left:3vw; }
+  body::after{ right:3vw; }
+  /* 모바일에서는 과감히 숨김 */
+  @media(max-width: 980px){ body::before, body::after{ display:none; } }
+
+  .wrap{max-width:980px;margin:40px auto;padding:0 16px; position:relative; z-index:1;}
+  .card{
+    background:var(--card); border:1px solid rgba(0,0,0,.08);
+    border-radius:16px; padding:20px; box-shadow:0 2px 6px rgba(0,0,0,0.05);
+  }
+  h1{margin:0 0 10px}
+  .muted{color:var(--muted)}
+  label{display:block;margin:10px 0 6px;color:var(--muted)}
+  .btn{
+    background:var(--accent); color:#fff; border:none; padding:10px 14px;
+    border-radius:10px; font-weight:700; cursor:pointer
+  }
+  .btn:hover{filter:brightness(1.05)}
+  .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#f2f2f2;color:#333;margin:2px 6px 2px 0;font-size:12px}
+  .small{font-size:12px;color:var(--muted)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{border-bottom:1px solid rgba(0,0,0,.08);padding:8px 6px;text-align:left}
+  th{color:var(--muted)}
+  input[type=file]{
+    width:100%; padding:12px; border-radius:12px; border:1px solid rgba(0,0,0,.12);
+    background:#fafafa; color:#222;
+  }
+  img.preview{max-width:100%;border-radius:12px;border:1px solid rgba(0,0,0,.08);display:none}
+  .grid{display:grid;grid-template-columns:1fr;gap:16px}
+  @media(min-width:980px){ .grid{grid-template-columns:2fr 1fr} }
+  .checks label{display:flex;gap:8px;align-items:center;color:#333}
+  .avoid-label{margin-top:18px;color:#444;font-weight:600}
+  .avoid-input{
+    width:100%; margin-top:8px; padding:10px; border-radius:8px;
+    border:1px solid rgba(0,0,0,.15); background:#fafafa; color:#222;
+  }
+  .avoid-input:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(106,163,255,0.2); }
+  .result-grid{display:grid;grid-template-columns:1fr;gap:16px}
+  @media(min-width:980px){ .result-grid{grid-template-columns:1fr 1fr} }
+  .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef3ff;color:#1a2e66;margin:4px 6px 0 0;font-size:12px}
+  .ok{background:#e9f9ef;color:#0d6b3d}
+  .warn{background:#fff2f0;color:#8a1f11}
+  .radio-list{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+  .choice-card{border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:10px}
+
+  /* 제목 옆 작은 로고 */
+  .brand{display:flex;align-items:center;gap:12px;margin:0 0 10px}
+  .brand img{height:42px;width:42px;object-fit:contain;border-radius:8px}
+</style>
+"""
+
+# ===== 메인 페이지 =====
+INDEX_HTML = BASE_CSS + """
+<div class="wrap">
+  <div class="card">
+    <div class="brand">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="FoodSafe AI logo">
+      <h1>FoodSafe AI</h1>
+    </div>
+    <p class="muted">음식 사진을 올리시면 체크하신 ‘알러지’와 ‘피하고 싶은 재료’의 포함 여부를 확인해드려요.</p>
+
+    <form id="resultForm" action="/result" method="POST" enctype="multipart/form-data">
+      <div class="grid">
+        <div class="card">
+          <label> 음식 사진을 선택해주세요!</label>
+          <input id="fileInput" name="image" type="file" accept="image/*" required>
+          <span id="fileName" class="small" style="display:inline-block;margin-top:8px;"></span>
+          <div style="margin-top:12px"><img id="imgPreview" class="preview" alt="preview"></div>
+        </div>
+
+        <div class="card">
+          <label> 피하고 싶은 알러지를 선택해주세요! (복수 선택 가능)</label>
+          <div class="checks" id="allergenChecks">
+            {% for code, name in allergens %}
+              <label><input type="checkbox" name="allergens" value="{{ code }}"> {{ name }}</label>
+            {% endfor %}
+          </div>
+          <div style="margin-top:12px">
+            <div class="small"> 현재 선택된 항목:</div>
+            <div id="selectedBadges"></div>
+          </div>
+
+          <label class="avoid-label"> 피하고 싶은 재료를 적어주세요</label>
+          <input type="text" name="avoid_foods" class="avoid-input" placeholder="예: 오이">
+          <input type="text" name="avoid_foods" class="avoid-input" placeholder="예: 고수">
+          <input type="text" name="avoid_foods" class="avoid-input" placeholder="예: 청양고추">
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:16px; justify-content:flex-end">
+        <button class="btn" type="submit"> 확인하기</button>
+      </div>
+    </form>
+
+    <p class="small" style="margin-top:12px">
+      ※ 업로드 이미지는 저장되지 않고 메모리에서만 처리됩니다. (가중치: <code>best_model.pt</code>, 라벨: <code>label_map.txt</code>)
+    </p>
+  </div>
+</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const imgPreview = document.getElementById('imgPreview');
+  const fileNameEl = document.getElementById('fileName');
+  const checksBox = document.getElementById('allergenChecks');
+  const selectedBadges = document.getElementById('selectedBadges');
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) { imgPreview.style.display='none'; imgPreview.src=''; fileNameEl.textContent=''; return; }
+    const url = URL.createObjectURL(file);
+    imgPreview.src = url; imgPreview.style.display='block'; fileNameEl.textContent = "선택됨: " + file.name;
+    imgPreview.onload = () => URL.revokeObjectURL(url);
+  });
+
+  function refreshBadges(){
+    selectedBadges.innerHTML='';
+    checksBox.querySelectorAll('input[type="checkbox"]').forEach(cb=>{
+      if(cb.checked){
+        const tag=document.createElement('span'); tag.className='badge';
+        tag.textContent=cb.parentElement.textContent.trim(); selectedBadges.appendChild(tag);
+      }
+    });
+  }
+  checksBox.addEventListener('change', refreshBadges); refreshBadges();
+
+  document.getElementById('resultForm').addEventListener('submit', (e)=>{
+    if(!fileInput.files || !fileInput.files[0]){ e.preventDefault(); alert('먼저 음식 사진을 선택해주세요!'); }
+  });
+</script>
+"""
+
+# ===== 결과 페이지 =====
+RESULT_HTML = BASE_CSS + """
+<div class="wrap">
+  <div class="card">
+    <h1> 결과 확인</h1>
+    <p class="muted">업로드하신 사진을 분석한 결과와 주의가 필요한 항목을 정리했어요.</p>
+
+    <div class="result-grid">
+      <div class="card">
+        <h2>예측된 음식</h2>
+        <p style="font-size:18px;font-weight:800">{{ food_name }} <span class="small">(확률: {{ (food_prob*100)|round(2) }}%)</span></p>
+        <div style="margin-top:10px">
+          {% if img_data_url %}<img src="{{ img_data_url }}" alt="uploaded" style="max-width:100%;border-radius:12px;border:1px solid rgba(0,0,0,.08)">{% else %}<div class="small muted">이미지를 표시할 수 없습니다.</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>알러지</h2>
+        <h3 style="margin-top:8px">체크한 알러지 :</h3>
+        <div>{% if allergens and allergens|length>0 %}{% for a in allergens %}<span class="pill">{{ a }}</span>{% endfor %}{% else %}<div class="small muted">선택한 알러지가 없습니다.</div>{% endif %}</div>
+
+        <h3 style="margin-top:18px">결과 :</h3>
+        <div>
+          {% if allergy_hits and allergy_hits|length>0 %}
+            {% for hit in allergy_hits %}
+              <div class="pill warn" style="display:block;margin:6px 0;">해당 음식에 들어간 <b>{{ hit.ing }}</b>(이)가 체크하신 <b>{{ hit.allergy }} 알러지</b>를 유발할 수 있어요.</div>
+            {% endfor %}
+          {% else %}
+            <div class="pill ok" style="display:block;margin:6px 0;">해당 음식에는 체크하신 알러지를 유발하는 재료가 들어있지 않아요.</div>
+          {% endif %}
+        </div>
+
+        <h2 style="margin-top:18px">피하고 싶은 재료</h2>
+        <div>
+          {% set any_input = false %}
+          {% for f in avoid_foods %}{% if f and f.strip() %}{% set any_input = true %}<span class="pill">{{ f.strip() }}</span>{% endif %}{% endfor %}
+          {% if not any_input %}<div class="small muted"></div>{% endif %}
+        </div>
+
+        <h3 style="margin-top:12px">결과 :</h3>
+        <div>
+          {% if avoid_hits and avoid_hits|length>0 %}
+            {% for name in avoid_hits %}<div class="pill warn" style="display:block;margin:6px 0;">해당 음식에는 선택하신 "<b>{{ name }}</b>"(이)가 들어있어요.</div>{% endfor %}
+          {% else %}
+            {% if any_input %}<div class="pill ok" style="display:block;margin:6px 0;">해당 음식에는 입력하신 재료가 들어있지 않아요.</div>{% endif %}
+          {% endif %}
+        </div>
+
+        <div style="margin-top:20px"><a href="/" class="btn"> 처음으로 돌아가기</a></div>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+
+# ===== 후보 선택 페이지 =====
+RESULT_CHOOSE_HTML = BASE_CSS + """
+<div class="wrap">
+  <div class="card">
+    <h1> 음식 후보를 선택해주세요</h1>
+    <p class="muted">모델 확신도가 낮아 Top-3 후보를 보여드려요. 가장 가까운 음식을 선택하면 결과를 맞춤으로 보여드릴게요.</p>
+
+    <div class="result-grid">
+      <div class="card">{% if img_data_url %}<img src="{{ img_data_url }}" alt="uploaded" style="max-width:100%;border-radius:12px;border:1px solid rgba(0,0,0,.08)">{% endif %}</div>
+      <div class="card">
+        <h2>후보 목록</h2>
+        <form method="POST" action="/result">
+          <div class="radio-list">
+            {% for cand in top3 %}
+              <label class="choice-card"><input type="radio" name="chosen_food" value="{{ cand.label }}" {% if loop.first %}checked{% endif %}> <b>{{ cand.label }}</b> <span class="small">(확률: {{ (cand.prob*100)|round(2) }}%)</span></label>
+            {% endfor %}
+          </div>
+          <input type="hidden" name="img_b64" value="{{ img_b64 }}">
+          {% for code in allergen_codes %}<input type="hidden" name="allergens" value="{{ code }}">{% endfor %}
+          {% for f in avoid_foods %}<input type="hidden" name="avoid_foods" value="{{ f }}">{% endfor %}
+          <div class="row" style="margin-top:16px; justify-content:flex-end"><button class="btn" type="submit">이 음식으로 결과 보기</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+
+@app.route("/", methods=["GET"])
+def index():
+    return render_template_string(INDEX_HTML, allergens=ALLERGENS)
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    if "image" not in request.files: abort(400, "이미지 파일이 필요합니다.")
+    file = request.files["image"]
+    if file.filename == "": abort(400, "파일을 선택하세요.")
+    raw = file.read()
+    if not raw: abort(400, "빈 파일입니다.")
+    try: img = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception: abort(400, "이미지 열기 실패")
+
+    with torch.no_grad():
+        x = TFMS(img).unsqueeze(0).to(device)
+        logits = MODEL(x)
+        probs = torch.softmax(logits, dim=1)[0].cpu().tolist()
+
+    pairs = list(zip(CLASS_NAMES, probs))
+    pairs.sort(key=lambda t: t[1], reverse=True)
+    top1 = {"label": pairs[0][0], "prob": float(pairs[0][1])}
+    topk = [{"label": lbl, "prob": float(p)} for lbl, p in pairs[:3]]
+    return jsonify({"top1": top1, "topk": topk})
+
+@app.route("/result", methods=["POST"])
+def result():
+    img = None; img_b64 = None
+    if "image" in request.files and request.files["image"].filename != "":
+        raw = request.files["image"].read()
+        if not raw: abort(400, "빈 파일입니다.")
+        try: img = Image.open(io.BytesIO(raw)).convert("RGB")
+        except Exception: abort(400, "이미지 열기 실패")
+        buf = io.BytesIO(); img.save(buf, format="JPEG"); img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    else:
+        img_b64 = request.form.get("img_b64", "")
+        if not img_b64: abort(400, "이미지 데이터가 없습니다.")
+        try: img = Image.open(io.BytesIO(base64.b64decode(img_b64))).convert("RGB")
+        except Exception: abort(400, "이미지 디코딩 실패")
+
+    img_data_url = f"data:image/jpeg;base64,{img_b64}"
+    selected_allergen_codes = request.form.getlist("allergens")
+    allergens_kr = [ALLERGEN_MAP.get(code, code) for code in selected_allergen_codes]
+    avoid_foods = [s.strip() for s in request.form.getlist("avoid_foods") if s.strip()]
+
+    with torch.no_grad():
+        x = TFMS(img).unsqueeze(0).to(device)
+        logits = MODEL(x)
+        probs = torch.softmax(logits, dim=1)[0].cpu().tolist()
+    pairs = list(zip(CLASS_NAMES, probs)); pairs.sort(key=lambda t: t[1], reverse=True)
+ 
+    chosen_food = request.form.get("chosen_food")
+    if chosen_food:
+        food_name = chosen_food
+        prob_lookup = {lbl: p for lbl, p in pairs}; food_prob = float(prob_lookup.get(food_name, 0.0))
+    else:
+        top1_label, top1_prob = pairs[0][0], float(pairs[0][1])
+        if top1_prob < 0.60:
+            top3 = [{"label": lbl, "prob": float(p)} for lbl, p in pairs[:3]]
+            return render_template_string(RESULT_CHOOSE_HTML, top3=top3, img_b64=img_b64, img_data_url=img_data_url,
+                                          allergen_codes=selected_allergen_codes, avoid_foods=avoid_foods)
+        food_name, food_prob = top1_label, top1_prob
+
+
+    ##############################################################################################################
+    # XML에서 재료 추출 → 알러지/회피 재료 매칭
+    allergy_hits = []
+    avoid_hits = []
+    ingredients = []
+
+    try:
+        # ✅ 로컬 XML 파일 불러오기
+        tree = ET.parse("api_xml.xml")
+        root = tree.getroot()
+
+        data = []
+        for row in root.iter("row"):
+            item = {
+                "레시피번호": (row.findtext("RCP_SEQ") or "").strip(),
+                "레시피명": (row.findtext("RCP_NM") or "").strip(),
+                "재료정보": (row.findtext("RCP_PARTS_DTLS") or "").strip(),
+            }
+            if item["레시피명"] and item["재료정보"]:
+                data.append(item)
+
+        df = pd.DataFrame(data)
+
+        def fuzzy_search_rapidfuzz(df, query, topn=5):
+            names = df["레시피명"].astype(str).tolist()
+            results = process.extract(query, names, scorer=fuzz.WRatio, limit=topn)
+            out = [{"레시피명": m[0], "점수(0~100)": m[1]} for m in results]
+            return pd.DataFrame(out)
+
+        # 레시피 검색
+        high_possible_result = fuzzy_search_rapidfuzz(df, food_name, topn=5)
+        print(high_possible_result)
+
+        if not high_possible_result.empty:
+            recipe_name = high_possible_result.iloc[0]["레시피명"]  # 가장 높은 후보
+            result_ing = df.loc[df["레시피명"] == recipe_name, "재료정보"]
+
+            if not result_ing.empty:
+                # 콤마 기준으로 나눠서 리스트화
+                ingredients = [i.strip() for i in result_ing.iloc[0].split(",") if i.strip()]
+
+                # --- 알러지 매칭: 시노님 s 가 재료 ing 안에 포함되면 매칭(한 방향), 기존 저장 형식 유지 ---
+                for code in selected_allergen_codes:
+                    syns = ALLERGEN_ING_SYNONYMS.get(code, [code])  # 없으면 코드 자체
+                    ing_match = None
+                    for ing in ingredients:
+                        if any(s and (s in ing) for s in syns):
+                            ing_match = ing  # 실제 들어있는 재료 문자열 (예: "밀가루 30g")
+                            break
+                    if ing_match:
+                        allergy_hits.append({
+                            "allergy": ALLERGEN_MAP.get(code, code),
+                            "ing": ing_match
+                        })
+
+                # --- 피하고 싶은 재료 매칭: term 이 재료 ing 안에 포함되면 매칭(한 방향) ---
+                for term in avoid_foods:
+                    if any(term and (term in ing) for ing in ingredients):
+                        avoid_hits.append(term)
+
+    except Exception as e:
+        print("[WARN] XML 처리 실패:", e)
+    ##############################################################################################################
+
+    # ✅ 항상 반환 (XML 실패/미매칭이어도 빈 리스트로 렌더)
+    return render_template_string(
+        RESULT_HTML,
+        food_name=food_name,
+        food_prob=food_prob,
+        allergens=allergens_kr,
+        avoid_foods=avoid_foods,
+        img_data_url=img_data_url,
+        allergy_hits=allergy_hits,
+        avoid_hits=avoid_hits
+    )
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
