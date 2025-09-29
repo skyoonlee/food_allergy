@@ -60,36 +60,77 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-# 3. 새로운 데이터셋 불러오기 (최상위 폴더 경로만 지정하면 돼요!)
-# /content/drive/MyDrive/Food_allergy/image/ 이 폴더 안에 구이, 찌개, 볶음 폴더가 있고
-# 그 아래에 갈비구이, 김치찌개 등의 실제 음식 폴더가 있다면 이 경로를 사용해주세요!
-new_data_dir = '/content/drive/MyDrive/Food_allergy/image/'  
-new_dataset = FoodDataset(new_data_dir, transform=transform)
-new_dataloader = DataLoader(new_dataset, batch_size=32, shuffle=True)
+# 3. 새로운 데이터셋 불러오기
+# 이번엔 '김치찌개' 데이터가 포함된 전체 데이터셋 경로를 지정해요.
+# /content/drive/MyDrive/Food_allergy/image/ 이 폴더 안에 구이, 찌개(김치찌개 포함), 볶음 폴더가 있어야 해요!
+data_dir_with_kimchi = '/content/drive/MyDrive/Food_allergy/image/'  # 김치찌개까지 포함된 모든 음식 데이터셋 경로
+full_dataset = FoodDataset(data_dir_with_kimchi, transform=transform) # FoodDataset 사용하면 모든 하위 폴더의 음식을 클래스로 잘 인식해요!
+full_dataloader = DataLoader(full_dataset, batch_size=32, shuffle=True)
 
-# 4. 기존 모델 불러오기 (클래스 개수만 변경해주면 돼요!)
+# 4. 기존 모델 불러오기 및 업데이트! (✨ 이 부분이 가장 중요해요! ✨)
+model = None
+# 여기에 1차 학습 후 저장한 모델 파일 경로를 넣어주세요!
+# 예: '/content/drive/MyDrive/food_allergy_model_v1.pt'
+previous_model_path = 'food_allergy_model_updated.pt' # 또는 1차 학습 후 저장했던 파일명
+
 try:
-    # 기존 모델 불러오기
-    # 모델 저장할 때 모델의 fc layer도 같이 저장되므로 여기선 fc layer를 다시 정의하지 않아도 됩니다.
-    # 만약 pretrained=True 로 로드된 모델이라면 num_classes 변경해야 합니다.
-    model = torch.load('') # 여기에 기존 모델 경로를 넣어주세요. 예: '/content/drive/MyDrive/food_model.pt'
+    print(f"🔍 기존 모델 '{previous_model_path}'를 불러오는 중...")
+    model = torch.load(previous_model_path)
     print("✅ 기존 모델 불러오기 성공!")
-    # 이미 학습된 모델의 최종 분류 층만 변경하고 싶을 때 (새로운 클래스 추가/변경 시)
-    # num_classes = len(new_dataset.classes)
-    # model.fc = nn.Linear(model.fc.in_features, num_classes)
-except FileNotFoundError: # torch.load가 파일을 못 찾을 때 FileNotFoundError를 냅니다.
-    print("❌ 기존 모델이 없어요! 처음부터 학습을 시작할게요.")
-    # ResNet-18 모델 불러와서 마지막 층 수정하기
-    model = models.resnet18(pretrained=True)
-    num_classes = len(new_dataset.classes) # 수정된 FoodDataset에서 찾은 클래스 개수 사용
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
-except Exception as e: # 다른 오류 발생 시
-    print(f"모델 로드 중 오류 발생: {e}")
-    print("❌ 기존 모델 로드에 실패하여 처음부터 학습을 시작할게요.")
-    model = models.resnet18(pretrained=True)
-    num_classes = len(new_dataset.classes)
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
+    
+    # 🌟🌟 핵심 부분: 모델의 최종 분류 층(fc layer) 업데이트 🌟🌟
+    # 1차 학습 모델은 김치찌개가 없었으니, 현재 (김치찌개가 포함된) 전체 클래스 개수와 다를 수 있어요.
+    num_total_classes = len(full_dataset.classes) # 현재 데이터셋의 전체 클래스 개수
 
+    if isinstance(model, models.ResNet): # 불러온 모델이 ResNet 계열인지 확인해요!
+        # 기존 fc 층의 입력 특성 수는 그대로 사용하고, 출력 특성 수만 새롭게 맞춰줘요.
+        # 이렇게 하면 기존에 학습된 특징 추출 부분(convolution layers)은 그대로 유지하고,
+        # 새로운 클래스를 분류할 수 있도록 마지막 층만 새롭게 갈아 끼우는 효과가 있어요.
+        if model.fc.out_features != num_total_classes: # 클래스 개수가 달라졌으면 업데이트!
+            original_in_features = model.fc.in_features
+            model.fc = nn.Linear(original_in_features, num_total_classes)
+            print(f"✔️ 기존 모델의 최종 분류 층을 {model.fc.out_features}개 클래스에 맞게 새로 만들었어요!")
+        else:
+            print(f"👍 모델의 최종 분류 층이 이미 {num_total_classes}개 클래스에 맞춰져 있네요!")
+    else:
+        print("💡 주의: 불러온 모델이 ResNet이 아닌 것 같아요. 최종 분류 층 수정이 필요할 수 있습니다.")
+
+except (FileNotFoundError, RuntimeError) as e: # 파일을 못 찾거나, torch.load 에러 시
+    print(f"❌ 기존 모델 로드 중 오류 발생 또는 파일 없음: {e}. 처음부터 학습을 시작할게요.")
+    # ResNet-18 모델을 불러와서 마지막 층 수정하기
+    model = models.resnet18(pretrained=True)
+    num_total_classes = len(full_dataset.classes)
+    model.fc = nn.Linear(model.fc.in_features, num_total_classes)
+    print(f"✨ 새로운 ResNet-18 모델을 만들고, 최종 분류 층을 {num_total_classes}개 클래스에 맞게 설정했어요!")
+except Exception as e: # 그 외 모든 오류
+    print(f"예상치 못한 모델 로드 오류 발생: {e}. 새로운 모델로 시작합니다.")
+    model = models.resnet18(pretrained=True)
+    num_total_classes = len(full_dataset.classes)
+    model.fc = nn.Linear(model.fc.in_features, num_total_classes)
+    print(f"✨ 새로운 ResNet-18 모델을 만들고, 최종 분류 층을 {num_total_classes}개 클래스에 맞게 설정했어요!")
+
+
+# 5. 학습 설정 (동일)
+device = torch.device("cuda" if torch.cuda_ok() else "cpu")
+model = model.to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.00001)  # 아주 낮은 학습률로 파인튜닝하는 게 좋아요! (0.0001 -> 0.00001)
+
+# 6. 추가 학습 함수 (동일)
+# ...
+
+# 7. 모델 추가 학습 시작
+print("🚀 김치찌개가 포함된 전체 데이터로 추가 학습 시작!")
+# new_dataloader 대신, 김치찌개까지 포함된 full_dataloader를 사용해요!
+model = train_model(model, full_dataloader, criterion, optimizer, num_epochs=10) # 에폭을 좀 더 늘려줄 수도 있어요!
+
+# 8. 새로운 모델 저장
+torch.save(model, 'food_allergy_model_v2_with_kimchi.pt') # 새로운 버전으로 저장!
+print("✨ 추가 학습 완료! 새로운 모델이 'food_allergy_model_v2_with_kimchi.pt'로 저장되었어요!")
+
+# 9. 모델 테스트 (간단하게)
+# ... (test_model 함수 정의) ...
+test_model(model, full_dataloader) # 전체 데이터로 테스트!
 
 # 음식 이름들 각각의 모델이 아닌 하나의 통합 모델로 접근하기 위하여 수정
 # 모든 음식 카테고리를 한 번에 분류하고, 관리가 편하고, 추론시 하나의 모델만 불러오면 됨
