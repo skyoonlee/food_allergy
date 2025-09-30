@@ -163,14 +163,14 @@ BASE_CSS = """
   /* 양옆 배경 로고: 살짝 축소 */
   body::before, body::after{
     content:""; position:fixed; top:50%; transform:translateY(-50%);
-    width:min(26vw, 420px); height:min(26vw, 420px);
+    width:min(34vw, 560px); height:min(34vw, 560px);
     background-image:url('/static/logo.png');
     background-size:contain; background-repeat:no-repeat; background-position:center;
-    opacity:0.9; filter:drop-shadow(0 6px 18px rgba(0,0,0,.10));
+    opacity:1.0; filter:drop-shadow(0 6px 18px rgba(0,0,0,.12));
     pointer-events:none; z-index:0;
   }
-  body::before{ left:0.5vw; }
-  body::after{ right:0.5vw; }
+  body::before{ left:1vw; }
+  body::after{ right:1vw; }
   @media(max-width: 980px){ body::before, body::after{ display:none; } }
 
   /* 상하 여백 살짝 축소 */
