@@ -19,16 +19,14 @@ dst_logo = os.path.join(STATIC_DIR, "logo.png")
 if os.path.exists(src_logo) and not os.path.exists(dst_logo):
     shutil.copy(src_logo, dst_logo)
 
-# --- 임시 이미지 저장 폴더 [CHANGED]
+# --- 임시 이미지 저장 폴더
 TMP_DIR = os.path.join(os.getcwd(), "tmp")
 os.makedirs(TMP_DIR, exist_ok=True)
 
 # Flask 앱
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
-# --- 크기 제한 완화 (413 예방) [CHANGED]
-#   - 전체 요청 본문: 32MB
-#   - 비파일 폼 필드: 16MB (Flask 3.1+)
+# --- 크기 제한 완화 (413 예방)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
 app.config['MAX_FORM_MEMORY_SIZE'] = 16 * 1024 * 1024
 app.config['MAX_FORM_PARTS'] = 5000
@@ -45,8 +43,7 @@ ALLERGENS = [
 ]
 ALLERGEN_MAP = {k: v for k, v in ALLERGENS}
 
-#################################################################################################################
-###################################알러지 별로 해당하는 재료 딕셔너리 추가############################################
+# ===== 알러지-재료 시노님 =====
 ALLERGEN_ING_SYNONYMS = {
     "계란": ["계란", "달걀", "에그", "난백", "난황", "egg"],
     "우유": ["우유", "밀크", "버터", "치즈", "요거트", "분유", "milk"],
@@ -93,13 +90,11 @@ class DummyModel(nn.Module):
     def __init__(self, n): super().__init__(); self.n=n
     def forward(self, x): return torch.randn(x.size(0), self.n, device=x.device)
 
-# --- 기존 파일이 dict일 수도, 전체 모델일 수도 있으므로 안전 로드 [CHANGED]
 def try_load_model(n, ckpt="best_model.pt"):
     if not os.path.exists(ckpt):
         print("[INFO] best_model.pt 없음 → DummyModel")
         return DummyModel(n).to(device), 224
     ckpt_obj = torch.load(ckpt, map_location="cpu")
-    # img_size 추출
     img_size = 224
     if isinstance(ckpt_obj, dict) and "img_size" in ckpt_obj:
         img_size = ckpt_obj["img_size"]
@@ -135,7 +130,6 @@ def build_tfms(img_size=224):
 TFMS = build_tfms(IMG_SIZE)
 MODEL.eval()
 
-# --- 업로드 이미지 리사이즈(전송량 절감 + 추론 안정화) [CHANGED]
 MAX_UPLOAD_WIDTH = 1280
 def resize_if_large(img: Image.Image, max_w=MAX_UPLOAD_WIDTH):
     if img.width > max_w:
@@ -143,7 +137,6 @@ def resize_if_large(img: Image.Image, max_w=MAX_UPLOAD_WIDTH):
         return img.resize((max_w, h))
     return img
 
-# --- 임시 이미지 저장 & 로드(토큰 방식) [CHANGED]
 def save_temp_image(img_pil: Image.Image):
     token = uuid.uuid4().hex
     path = os.path.join(TMP_DIR, f"{token}.jpg")
@@ -167,60 +160,94 @@ BASE_CSS = """
     font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Noto Sans KR,Helvetica,Arial;
     position:relative; overflow-x:hidden;
   }
+  /* 양옆 배경 로고: 살짝 축소 */
   body::before, body::after{
     content:""; position:fixed; top:50%; transform:translateY(-50%);
-    width:min(34vw, 560px); height:min(34vw, 560px);
+    width:min(26vw, 420px); height:min(26vw, 420px);
     background-image:url('/static/logo.png');
     background-size:contain; background-repeat:no-repeat; background-position:center;
-    opacity:1.0; filter:drop-shadow(0 6px 18px rgba(0,0,0,.12));
+    opacity:0.9; filter:drop-shadow(0 6px 18px rgba(0,0,0,.10));
     pointer-events:none; z-index:0;
   }
-  body::before{ left:1vw; }
-  body::after{ right:1vw; }
+  body::before{ left:0.5vw; }
+  body::after{ right:0.5vw; }
   @media(max-width: 980px){ body::before, body::after{ display:none; } }
 
-  .wrap{max-width:980px;margin:40px auto;padding:0 16px; position:relative; z-index:1;}
+  /* 상하 여백 살짝 축소 */
+  .wrap{max-width:900px;margin:24px auto;padding:0 12px; position:relative; z-index:1;}
   .card{
     background:var(--card); border:1px solid rgba(0,0,0,.08);
-    border-radius:16px; padding:20px; box-shadow:0 2px 6px rgba(0,0,0,0.05);
+    border-radius:12px; padding:16px; box-shadow:0 2px 6px rgba(0,0,0,0.05);
   }
-  h1{margin:0 0 10px}
+  h1{margin:0 0 6px; font-size:26px}
+  h2{margin:0 0 8px; font-size:18px}
+  h3{margin:10px 0 6px; font-size:15px}
   .muted{color:var(--muted)}
-  label{display:block;margin:10px 0 6px;color:var(--muted)}
+  label{display:block;margin:8px 0 6px;color:var(--muted); font-size:14px}
   .btn{
-    background:var(--accent); color:#fff; border:none; padding:10px 14px;
-    border-radius:10px; font-weight:700; cursor:pointer
+    background:var(--accent); color:#fff; border:none; padding:8px 12px;
+    border-radius:10px; font-weight:700; cursor:pointer; font-size:14px
   }
   .btn:hover{filter:brightness(1.05)}
-  .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#f2f2f2;color:#333;margin:2px 6px 2px 0;font-size:12px}
+  .badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#f2f2f2;color:#333;margin:2px 6px 2px 0;font-size:11px}
   .small{font-size:12px;color:var(--muted)}
-  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  table{width:100%;border-collapse:collapse;margin-top:8px}
-  th,td{border-bottom:1px solid rgba(0,0,0,.08);padding:8px 6px;text-align:left}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;margin-top:6px}
+  th,td{border-bottom:1px solid rgba(0,0,0,.08);padding:6px 4px;text-align:left}
   th{color:var(--muted)}
   input[type=file]{
-    width:100%; padding:12px; border-radius:12px; border:1px solid rgba(0,0,0,.12);
-    background:#fafafa; color:#222;
+    width:100%; padding:10px; border-radius:10px; border:1px solid rgba(0,0,0,.12);
+    background:#fafafa; color:#222; font-size:14px
   }
-  img.preview{max-width:100%;border-radius:12px;border:1px solid rgba(0,0,0,.08);display:none}
-  .grid{display:grid;grid-template-columns:1fr;gap:16px}
-  @media(min-width:980px){ .grid{grid-template-columns:2fr 1fr} }
-  .checks label{display:flex;gap:8px;align-items:center;color:#333}
-  .avoid-label{margin-top:18px;color:#444;font-weight:600}
+  img.preview{max-width:100%;border-radius:10px;border:1px solid rgba(0,0,0,.08);display:none}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:980px){ .grid{grid-template-columns:1.8fr 1fr} }
+  .checks label{display:flex;gap:8px;align-items:center;color:#333;font-size:14px}
+  .avoid-label{margin-top:14px;color:#444;font-weight:600}
   .avoid-input{
-    width:100%; margin-top:8px; padding:10px; border-radius:8px;
-    border:1px solid rgba(0,0,0,.15); background:#fafafa; color:#222;
+    width:100%; margin-top:6px; padding:8px; border-radius:8px;
+    border:1px solid rgba(0,0,0,.15); background:#fafafa; color:#222; font-size:14px
   }
-  .avoid-input:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(106,163,255,0.2); }
-  .result-grid{display:grid;grid-template-columns:1fr;gap:16px}
+  .avoid-input:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(106,163,255,0.18); }
+  .result-grid{display:grid;grid-template-columns:1fr;gap:12px}
   @media(min-width:980px){ .result-grid{grid-template-columns:1fr 1fr} }
-  .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef3ff;color:#1a2e66;margin:4px 6px 0 0;font-size:12px}
+  .pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#eef3ff;color:#1a2e66;margin:3px 5px 0 0;font-size:12px}
   .ok{background:#e9f9ef;color:#0d6b3d}
   .warn{background:#fff2f0;color:#8a1f11}
-  .radio-list{display:flex;flex-direction:column;gap:10px;margin-top:10px}
-  .choice-card{border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:10px}
-  .brand{display:flex;align-items:center;gap:12px;margin:0 0 10px}
-  .brand img{height:42px;width:42px;object-fit:contain;border-radius:8px}
+  .radio-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .choice-card{border:1px solid rgba(0,0,0,.08);border-radius:10px;padding:8px}
+  .brand{display:flex;align-items:center;gap:10px;margin:0 0 6px}
+  .brand img{height:36px;width:36px;object-fit:contain;border-radius:8px}
+
+  /* Desktop에서 카드가 너무 아래로 밀리지 않게 전체 여백/패딩 축소 */
+  @media (max-width: 980px){
+    .wrap{
+      margin: 0 auto;
+      min-height: 100svh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding:
+        max(12px, env(safe-area-inset-top))
+        12px
+        max(12px, env(safe-area-inset-bottom))
+        12px;
+    }
+    .wrap > .card{ width: 100%; }
+  }
+
+  /* [A11Y] 스크린리더 전용 */
+  .sr-only {
+    position:absolute !important;
+    width:1px !important;
+    height:1px !important;
+    padding:0 !important;
+    margin:-1px !important;
+    overflow:hidden !important;
+    clip:rect(0,0,0,0) !important;
+    white-space:nowrap !important;
+    border:0 !important;
+  }
 </style>
 """
 
@@ -323,8 +350,13 @@ RESULT_HTML = BASE_CSS + """
 
       <div class="card">
         <h2>알러지</h2>
+
+        <!-- [A11Y] 스크린리더 자동 낭독 영역 -->
+        <div id="a11y-announce" class="sr-only" aria-live="polite" role="status"></div>
+
         <h3 style="margin-top:8px">체크한 알러지 :</h3>
-        <div>{% if allergens and allergens|length>0 %}{% for a in allergens %}<span class="pill">{{ a }}</span>{% endfor %}{% else %}<div class="small muted">선택한 알러지가 없습니다.</div>{% endif %}</div>
+        <div>{% if allergens and allergens|length>0 %}{% for a in allergens 
+        %}<span class="pill">{{ a }}</span>{% endfor %}{% else %}<div class="small muted">선택한 알러지가 없습니다.</div>{% endif %}</div>
 
         <h3 style="margin-top:18px">결과 :</h3>
         <div>
@@ -353,15 +385,157 @@ RESULT_HTML = BASE_CSS + """
           {% endif %}
         </div>
 
+        <!-- [A11Y] 음성 안내 버튼 -->
+        <div class="row" style="margin-top:16px; justify-content:flex-start">
+          <button class="btn" type="button" id="speakBtn" aria-label="결과를 음성으로 안내">음성으로 안내</button>
+        </div>
+
         <div style="margin-top:20px"><a href="/" class="btn"> 처음으로 돌아가기</a></div>
       </div>
     </div>
   </div>
 </div>
+
+<!-- [A11Y] 결과를 한국어 음성으로 읽어주는 스크립트 -->
+<script>
+  const allergyHits = {{ allergy_hits|tojson }};
+  const avoidHits = {{ avoid_hits|tojson }};
+  const selectedAllergens = {{ allergens|tojson }};
+  const foodName = {{ food_name|tojson }};
+  const foodProb = {{ (food_prob*100)|round(1) }};
+  const userEnteredAvoid = {{ (avoid_foods|length > 0)|tojson }};
+
+  function buildAnnouncement() {
+    const parts = [];
+    parts.push(`예측된 음식은 ${foodName}입니다. 확률 ${foodProb} 퍼센트.`);
+    if (selectedAllergens.length > 0) {
+      if (allergyHits.length > 0) {
+        const hitText = allergyHits.map(h => `${h.allergy} 관련 재료 ${h.ing}`).join(", ");
+        parts.push(`주의. 체크한 알러지와 관련된 재료가 포함되었습니다: ${hitText}.`);
+      } else {
+        parts.push("체크한 알러지를 유발하는 재료는 발견되지 않았습니다.");
+      }
+    }
+    if (userEnteredAvoid) {
+      if (avoidHits.length > 0) {
+        parts.push(`피하고 싶은 재료가 포함되었습니다: ${avoidHits.join(", ")}.`);
+      } else {
+        parts.push("입력하신 피하고 싶은 재료는 포함되지 않았습니다.");
+      }
+    }
+    return parts.join(" ");
+  }
+
+  // 스크린리더 자동 낭독 텍스트 주입
+  const a11yEl = document.getElementById('a11y-announce');
+  const message = buildAnnouncement();
+  if (a11yEl) a11yEl.textContent = message;
+
+  // 포커스 이동으로 스크린리더 진입점 제공
+  const h1 = document.querySelector('.wrap .card h1');
+  if (h1) { h1.setAttribute('tabindex', '-1'); h1.focus({ preventScroll: true }); }
+
+  
+  function speakWithFemaleKoVoice(text) {
+    if (!('speechSynthesis' in window)) return false;
+
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+
+    const chooseVoiceAndSpeak = () => {
+      const voices = window.speechSynthesis.getVoices() || [];
+      const isKo = v => (v.lang || '').toLowerCase().startsWith('ko');
+
+      // 여성 보이스 힌트(이름에 포함되어 있으면 가산점)
+      const FEMALE_HINTS = [
+        'female','woman','여성','여자',
+        // --- 변경된 부분 ---
+        // 아이폰 Safari의 대표적인 한국어 여성 음성 'Yuna' 추가
+        'yuna', 
+        // ------------------
+        'nuri','yuri','suna','seoyeon','sunhi','heami',
+        'youngmi','minji','yejin','jimin','ara','jieun',
+        'ko-kr-standard-a','ko-kr-wavenet-a',
+        'ko-kr-standard-c','ko-kr-wavenet-c',
+        'ko-kr-standard-e','ko-kr-wavenet-e'
+      ];
+      const isFemaleName = (name='') => {
+        const low = name.toLowerCase();
+        return FEMALE_HINTS.some(h => low.includes(h));
+      };
+
+      // 우선순위: 한국어+여성힌트 > 한국어 > 여성힌트 > 아무거나
+      let pick =
+        voices.find(v => isKo(v) && isFemaleName(v.name)) ||
+        voices.find(v => isKo(v)) ||
+        voices.find(v => isFemaleName(v.name)) ||
+        voices[0];
+
+      if (pick) {
+        u.voice = pick;
+        u.lang = pick.lang || 'ko-KR';
+      } else {
+        u.lang = 'ko-KR';
+      }
+
+      // 좀 더 밝은 여성 톤
+      u.pitch  = 1.2;
+      u.rate   = 1.0;
+      u.volume = 1.0;
+
+      // iOS Safari에서 speak가 멈추는 현상 방지 해크
+      const resumeInterval = setInterval(() => {
+        window.speechSynthesis.resume();
+      }, 250);
+      u.onend = u.onerror = () => clearInterval(resumeInterval);
+
+      window.speechSynthesis.speak(u);
+    };
+
+    const voicesNow = window.speechSynthesis.getVoices();
+    if (voicesNow && voicesNow.length) chooseVoiceAndSpeak();
+    else window.speechSynthesis.onvoiceschanged = chooseVoiceAndSpeak;
+
+    return true;
+  }
+
+  // 자동 1회 재생 + 실패 시 버튼으로 안내
+  let autoSpoken = false;
+  function tryAutoSpeakOnce() {
+    if (autoSpoken) return;
+    autoSpoken = true;
+    const ok = speakWithFemaleKoVoice(message);
+
+    // 1.2초 안에 말하고 있지 않다면(모바일 자동재생 차단 등) 버튼으로 유도
+    setTimeout(() => {
+      if (!window.speechSynthesis.speaking) {
+        const btn = document.getElementById('speakBtn');
+        if (btn) btn.textContent = '음성 켜기 / 다시 듣기';
+      }
+    }, 1200);
+  }
+
+  // 약간 지연 후 자동 시도(보이스 로드 대기)
+  window.setTimeout(tryAutoSpeakOnce, 400);
+
+  // 탭 재진입 시(처음 자동재생 실패 대비) 한 번 더 시도
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !autoSpoken) {
+      tryAutoSpeakOnce();
+    }
+  });
+
+  // 버튼으로 다시 듣기
+  const speakBtn = document.getElementById('speakBtn');
+  if (speakBtn) {
+    speakBtn.addEventListener('click', () => {
+      speakWithFemaleKoVoice(message);
+    });
+  }
+</script>
 """
 
 # ===== 후보 선택 페이지 =====
-#  - img_b64 제거하고 img_token 사용하도록 수정 [CHANGED]
 RESULT_CHOOSE_HTML = BASE_CSS + """
 <div class="wrap">
   <div class="card">
@@ -405,7 +579,7 @@ def predict():
     except Exception:
         abort(400, "이미지 열기 실패")
 
-    img = resize_if_large(img)  # [CHANGED]
+    img = resize_if_large(img)
 
     with torch.no_grad():
         x = TFMS(img).unsqueeze(0).to(device)
@@ -420,7 +594,6 @@ def predict():
 
 @app.route("/result", methods=["POST"])
 def result():
-    # 1) 업로드로 처음 도착했는지, 후보선택에서 돌아왔는지 분기 [CHANGED]
     img = None
     token = None
     if "image" in request.files and request.files["image"].filename != "":
@@ -430,13 +603,12 @@ def result():
             img = Image.open(io.BytesIO(raw)).convert("RGB")
         except Exception:
             abort(400, "이미지 열기 실패")
-        img = resize_if_large(img)  # 모바일 사진 리사이즈 [CHANGED]
-        token, path = save_temp_image(img)  # 서버 임시 저장 [CHANGED]
+        img = resize_if_large(img)
+        token, path = save_temp_image(img)
     else:
         token = request.form.get("img_token", "")
-        img, path = load_temp_image(token)  # 임시 이미지 재사용 [CHANGED]
+        img, path = load_temp_image(token)
 
-    # 프리뷰는 data URL로 (크기 작아서 괜찮음)
     buf = io.BytesIO(); img.save(buf, format="JPEG", quality=85)
     img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
     img_data_url = f"data:image/jpeg;base64,{img_b64}"
@@ -459,7 +631,6 @@ def result():
         top1_label, top1_prob = pairs[0][0], float(pairs[0][1])
         if top1_prob < 0.60:
             top3 = [{"label": lbl, "prob": float(p)} for lbl, p in pairs[:3]]
-            # 후보 선택 화면으로 → img_token 전달 [CHANGED]
             return render_template_string(
                 RESULT_CHOOSE_HTML,
                 top3=top3,
@@ -473,12 +644,9 @@ def result():
     # ===== XML에서 재료 추출 → 알러지/회피 재료 매칭
     allergy_hits = []
     avoid_hits = []
-    ingredients = []
-
     try:
         tree = ET.parse("api_xml.xml")
         root = tree.getroot()
-
         data = []
         for row in root.iter("row"):
             item = {
@@ -488,7 +656,6 @@ def result():
             }
             if item["레시피명"] and item["재료정보"]:
                 data.append(item)
-
         df = pd.DataFrame(data)
 
         def fuzzy_search_rapidfuzz(df, query, topn=5):
@@ -501,22 +668,16 @@ def result():
         if not high_possible_result.empty:
             recipe_name = high_possible_result.iloc[0]["레시피명"]
             result_ing = df.loc[df["레시피명"] == recipe_name, "재료정보"]
-
             if not result_ing.empty:
                 ingredients = [i.strip() for i in result_ing.iloc[0].split(",") if i.strip()]
-
                 for code in selected_allergen_codes:
                     syns = ALLERGEN_ING_SYNONYMS.get(code, [code])
                     ing_match = None
                     for ing in ingredients:
                         if any(s and (s in ing) for s in syns):
-                            ing_match = ing
-                            break
+                            ing_match = ing; break
                     if ing_match:
-                        allergy_hits.append({
-                            "allergy": ALLERGEN_MAP.get(code, code),
-                            "ing": ing_match
-                        })
+                        allergy_hits.append({"allergy": ALLERGEN_MAP.get(code, code), "ing": ing_match})
 
                 for term in avoid_foods:
                     if any(term and (term in ing) for ing in ingredients):
@@ -536,12 +697,11 @@ def result():
         avoid_hits=avoid_hits
     )
 
-# 413 사용자 친화 에러 [CHANGED]
 @app.errorhandler(RequestEntityTooLarge)
 def handle_file_too_large(e):
     return ("요청 데이터가 너무 큽니다. 사진 해상도를 낮추거나 다시 시도해주세요.", 413)
 
 if __name__ == "__main__":
-    # 주피터/로컬에서: http://127.0.0.1:5000
+    # 주피터/로컬: http://127.0.0.1:5000
     # ngrok: 별도 터미널에서 `ngrok http 5000`
     app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
