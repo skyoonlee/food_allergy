@@ -7,14 +7,18 @@ from rapidfuzz import process, fuzz
 tree = ET.parse("api_xml.xml")  # 같은 폴더 안에 있는 recipes.xml
 root = tree.getroot()
 
+
+# row.find("RCP_SEQ").text -> row.findtext("RCP_SEQ") 변경
+# 레시피 NM 지운 곳에서 None 값 출력 오류수정 (continue 방식보다 text 추출 방식으로 진행)
 data = []
 for row in root.iter("row"):
     item = {
-        "레시피번호": row.find("RCP_SEQ").text,
-        "레시피명": row.find("RCP_NM").text,
-        "재료정보": row.find("RCP_PARTS_DTLS").text
+        "레시피번호": row.findtext("RCP_SEQ"),
+        "레시피명": row.findtext("RCP_NM"),
+        "재료정보": row.findtext("RCP_PARTS_DTLS")
     }
     data.append(item)
+
 
 df = pd.DataFrame(data)
 
@@ -30,10 +34,10 @@ allergy_dict = {
     "우유": ["우유", "밀크", "버터", "치즈", "요거트", "분유", "milk"],
     "밀": ["밀", "밀가루", "소맥", "wheat", "글루텐","햄버거","라면","빵"],
     "갑각류": ["새우", "새우살", "대하", "대게", "꽃게", "킹크랩", "랍스터", "게", "crab", "shrimp", "lobster"],
-    "생선": ["생선", "어류", "고등어", "연어", "참치", "삼치", "fish", "mackerel", "salmon", "tuna","북어","황태"],
+    "생선": ["생선", "어류", "고등어", "연어", "참치", "삼치", "fish", "mackerel", "salmon", "tuna","북어","황태","아귀"],
     "돼지고기": ["돼지고기", "돼지", "돈육", "pork"],
     "견과류": ["땅콩", "peanut","호두", "walnut","콩", "대두", "두유", "soybean", "soy","잣"],
-    "조개": ["조개", "홍합", "바지락", "굴", "가리비", "clam", "mussel", "scallop", "oyster"],
+    "조개": ["조개", "홍합", "바지락", "굴", "가리비","관자", "clam", "mussel", "scallop", "oyster"],
     "복숭아": ["복숭아", "peach"],
     "콩": ["콩", "대두", "두유", "soybean", "soy"],
     "사과": ["사과", "apple"],
@@ -45,6 +49,7 @@ allergy_dict = {
     "들깨": ["들깨", "perilla", "perilla seed"],
     "토마토": ["토마토", "tomato","케첩"],
     "오징어": ["오징어", "squid"],
+    "해조류": ["미역", "seaweedquid"],
     # 필요하면 추가하세요
 }
 
@@ -64,7 +69,8 @@ if not high_possible_result.empty:
 
     if not result_ing.empty:
         # 콤마 기준으로 나눠서 리스트화
-        ingredients = [i.strip() for i in result_ing.iloc[0].split(",")]
+        # replace로 줄바꿈 \n 표기 삭제
+        ingredients = [i.strip() for i in result_ing.iloc[0].replace("\n"," ").split(",")]
         print("재료 목록:", ingredients)
 
         # 알레르기 동의어 목록 가져오기
