@@ -14,6 +14,11 @@ import random
 drive.mount('/content/drive')
 data_dir = '/content/drive/MyDrive/Food_allergy/image'
 
+# 경로 잡히는지 확인
+full_dataset = FoodDataset(data_dir, transform=transform)
+print(f"총 샘플 수: {len(full_dataset)}")
+print(f"클래스 목록: {full_dataset.classes}")
+
 
 # 1. 커스텀 데이터셋 클래스 만들기
 class FoodDataset(Dataset):
