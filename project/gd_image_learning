@@ -282,7 +282,7 @@ model_name = f"food_allergy_model_{folder_name}_{timestamp}"
 model_name = "".join([c for c in model_name if c.isalpha() or c.isdigit() or c in ['_', '-']])
 torch.save(
     {"model_state_dict": model.state_dict(), "img_size": 224},
-    ""food_allergy_model_{folder_name}_{timestamp}.pt""
+    "food_allergy_model_{folder_name}_{timestamp}.pt"
 )
 print(f" 추가 학습 완료! 새로운 모델이 '{model_name}.pt'로 저장됨")
 
