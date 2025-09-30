@@ -1,0 +1,418 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms, models
+import numpy as np
+from google.colab import drive
+import os
+from PIL import Image
+import datetime
+import glob
+import random
+
+drive.mount('/content/drive')
+data_dir = '/content/drive/MyDrive/Food_allergy/image'
+
+# 경로 잡히는지 확인
+full_dataset = FoodDataset(data_dir, transform=transform)
+print(f"총 샘플 수: {len(full_dataset)}")
+print(f"클래스 목록: {full_dataset.classes}")
+
+
+# 1. 커스텀 데이터셋 클래스 만들기
+class FoodDataset(Dataset):
+    def __init__(self, data_dir, transform=None):
+        self.data_dir = data_dir
+        self.transform = transform
+        self.samples = []
+        self.class_to_idx = {}
+        idx_counter = 0
+
+        for root, dirs, files in os.walk(data_dir):
+            image_files = [f for f in files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
+
+            if len(image_files) > 0:
+                class_name = os.path.basename(root)
+                print(f"클래스 폴더 발견: {class_name} (이미지 개수: {len(image_files)})")
+
+                if class_name not in self.class_to_idx:
+                    self.class_to_idx[class_name] = idx_counter
+                    idx_counter += 1
+
+                for img_name in image_files:
+                    img_path = os.path.join(root, img_name)
+                    self.samples.append((img_path, self.class_to_idx[class_name]))
+
+        self.classes = list(self.class_to_idx.keys())
+        print(f"총 {len(self.classes)}개의 음식 클래스를 찾음: {self.classes}")
+        print(f"총 샘플 개수(이미지 수): {len(self.samples)}")
+
+    def __len__(self):
+        return len(self.samples)
+    
+    def __getitem__(self, idx):
+        img_path, label = self.samples[idx]
+        try:
+                
+            image = Image.open(img_path).convert('RGB')
+             
+            if self.transform:
+                image = self.transform(image)
+                
+            return image, label
+                
+        except Exception as e:
+            print(f"이미지 로드 중 오류 발생: {img_path}, 오류: {e}")
+            # 오류 발생 시 첫 번째 이미지로 대체 (더 좋은 방법이 있을 수 있어요)
+            if idx != 0 and len(self.samples) > 0:
+                return self.__getitem__(0)
+            else:
+                # 최후의 수단: 랜덤 텐서 생성
+                dummy_image = torch.randn(3, 224, 224)
+                return dummy_image, label
+def train_and_save_model_with_txt(data_dir, output_dir="./output", num_epochs=10, batch_size=16, learning_rate=0.00001):
+ 
+    # 모델을 학습시키고 pt 파일과 txt 파일을 동시에 생성하는 함수
+    
+    # Args:
+    #     data_dir: 이미지 데이터가 있는 폴더 경로
+    #     output_dir: 출력 파일들이 저장될 폴더 경로
+    #     num_epochs: 학습 에포크 수
+    #     batch_size: 배치 사이즈
+    #     learning_rate: 학습률
+    
+    # 출력 폴더 생성
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 현재 시간으로 타임스탬프 생성
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 1. 데이터 전처리 정의
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(10),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    # 2. 데이터셋 불러오기
+    full_dataset = FoodDataset(data_dir, transform=transform)
+    
+    # 3. txt 파일 생성 부분
+    # 클래스 매핑 파일 생성
+    class_mapping_file = os.path.join(output_dir, f"class_mapping_{timestamp}.txt")
+    with open(class_mapping_file, 'w', encoding='utf-8') as f:
+        for class_name, idx in full_dataset.class_to_idx.items():
+            f.write(f"{class_name}: {idx}\n")
+    
+    print(f"클래스 매핑 파일 생성 완료: {class_mapping_file}")
+    
+    # 데이터셋 파일 생성
+    all_samples = []
+    class_counts = {}
+    
+    for img_path, label in full_dataset.samples:
+        class_name = full_dataset.classes[label]
+        rel_path = os.path.relpath(img_path, start=data_dir)
+        all_samples.append((rel_path, label))
+        
+        if class_name not in class_counts:
+            class_counts[class_name] = 0
+        class_counts[class_name] += 1
+    
+    # 전체 데이터셋 파일 생성
+    dataset_file = os.path.join(output_dir, f"dataset_{timestamp}.txt")
+    with open(dataset_file, 'w', encoding='utf-8') as f:
+        for img_path, label in all_samples:
+            f.write(f"{img_path} {label}\n")
+    
+    print(f"전체 데이터셋 파일 생성 완료: {dataset_file} (총 {len(all_samples)}개 이미지)")
+    
+    # 학습/검증 분할 파일 생성 (8:2 비율)
+    random.shuffle(all_samples)
+    split_idx = int(len(all_samples) * 0.8)
+    train_samples = all_samples[:split_idx]
+    val_samples = all_samples[split_idx:]
+    
+    train_file = os.path.join(output_dir, f"train_{timestamp}.txt")
+    with open(train_file, 'w', encoding='utf-8') as f:
+        for img_path, label in train_samples:
+            f.write(f"{img_path} {label}\n")
+    
+    val_file = os.path.join(output_dir, f"val_{timestamp}.txt")
+    with open(val_file, 'w', encoding='utf-8') as f:
+        for img_path, label in val_samples:
+            f.write(f"{img_path} {label}\n")
+    
+    print(f"학습 데이터셋 파일 생성 완료: {train_file} (총 {len(train_samples)}개 이미지)")
+    print(f"검증 데이터셋 파일 생성 완료: {val_file} (총 {len(val_samples)}개 이미지)")
+
+
+
+# 2. 데이터 전처리 정의
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(10),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+# 3. 새로운 데이터셋 불러오기
+# 이번엔 '김치찌개' 데이터가 포함된 전체 데이터셋 경로를 지정해요.
+# /content/drive/MyDrive/Food_allergy/image/ 이 폴더 안에 구이, 찌개(김치찌개 포함), 볶음 폴더가 있어야 함
+
+full_dataset = FoodDataset(data_dir, transform=transform) # FoodDataset 사용하면 모든 하위 폴더의 음식을 클래스로 잘 인식
+full_dataloader = DataLoader(full_dataset, batch_size=16, shuffle=True, num_workers=0)
+
+# 4. 기존 모델 불러오기 및 업데이트
+model = None
+# 여기에 1차 학습 후 저장한 모델 파일 경로를 넣어주세요
+# 예: '/content/drive/MyDrive/food_allergy_model_v1.pt'
+previous_model_path = 'food_allergy_model_updated.pt' # 또는 1차 학습 후 저장했던 파일명
+
+try:
+    print(f"기존 모델 '{previous_model_path}'를 불러오는 중...")
+    model = torch.load(previous_model_path, map_location=torch.device('cpu'))
+    print("기존 모델 불러오기 성공!")
+    
+    # 핵심 부분: 모델의 최종 분류 층(fc layer) 업데이트
+    # 1차 학습 모델은 김치찌개가 없었으니, 현재 (김치찌개가 포함된) 전체 클래스 개수와 다를 수 있음
+    num_total_classes = len(full_dataset.classes) # 현재 데이터셋의 전체 클래스 개수
+# ver.3
+    if hasattr(model, 'fc'):  # ResNet 계열
+            if model.fc.out_features != num_total_classes:
+                original_in_features = model.fc.in_features
+                model.fc = nn.Linear(original_in_features, num_total_classes)
+                print(f"기존 모델의 최종 분류 층을 {model.fc.out_features}개 클래스에 맞게 새로 만들었어요!")
+            else:
+                print(f"모델의 최종 분류 층이 이미 {num_total_classes}개 클래스에 맞춰져 있네요!")
+    else:
+        print("주의: 불러온 모델이 ResNet이 아닌 것 같아요. 최종 분류 층 수정이 필요할 수 있습니다.")
+    
+except Exception as e:
+    print(f"기존 모델 로드 중 오류 발생: {e}. 처음부터 학습을 시작할게요.")
+    # ResNet-18 모델을 불러와서 마지막 층 수정하기
+    model = models.resnet18(pretrained=True)
+    num_total_classes = len(full_dataset.classes)
+    model.fc = nn.Linear(model.fc.in_features, num_total_classes)
+    print(f"새로운 ResNet-18 모델을 만들고, 최종 분류 층을 {num_total_classes}개 클래스에 맞게 설정했어요!")
+
+# ver.2
+#     if isinstance(model, models.ResNet): # 불러온 모델이 ResNet 계열인지 확인해요!
+#         # 기존 fc 층의 입력 특성 수는 그대로 사용하고, 출력 특성 수만 새롭게 맞춰줘요.
+#         # 이렇게 하면 기존에 학습된 특징 추출 부분(convolution layers)은 그대로 유지하고,
+#         # 새로운 클래스를 분류할 수 있도록 마지막 층만 새롭게 갈아 끼우는 효과가 있어요.
+#         if model.fc.out_features != num_total_classes: # 클래스 개수가 달라졌으면 업데이트!
+#             original_in_features = model.fc.in_features
+#             model.fc = nn.Linear(original_in_features, num_total_classes)
+#             print(f"기존 모델의 최종 분류 층을 {model.fc.out_features}개 클래스에 맞게 새로 만들었어요!")
+#         else:
+#             print(f"모델의 최종 분류 층이 이미 {num_total_classes}개 클래스에 맞춰져 있네요!")
+#     else:
+#         print("주의: 불러온 모델이 ResNet이 아닌 것 같아요. 최종 분류 층 수정이 필요할 수 있습니다.")
+
+# except (FileNotFoundError, RuntimeError) as e: # 파일을 못 찾거나, torch.load 에러 시
+#     print(f"기존 모델 로드 중 오류 발생 또는 파일 없음: {e}. 처음부터 학습을 시작합니다.")
+#     # ResNet-18 모델을 불러와서 마지막 층 수정하기
+#     model = models.resnet18(pretrained=True)
+#     num_total_classes = len(full_dataset.classes)
+#     model.fc = nn.Linear(model.fc.in_features, num_total_classes)
+#     print(f"새로운 ResNet-18 모델을 만들고, 최종 분류 층을 {num_total_classes}개 클래스에 맞게 설정함")
+# except Exception as e: # 그 외 모든 오류
+#     print(f"예상치 못한 모델 로드 오류 발생: {e}. 새로운 모델로 시작합니다.")
+#     model = models.resnet18(pretrained=True)
+#     num_total_classes = len(full_dataset.classes)
+#     model.fc = nn.Linear(model.fc.in_features, num_total_classes)
+#     print(f"새로운 ResNet-18 모델을 만들고, 최종 분류 층을 {num_total_classes}개 클래스에 맞게 설정함")
+
+
+# 5. 학습 설정 (동일)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"학습에 사용할 장치: {device}")
+model = model.to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.00001)  # 아주 낮은 학습률로 파인튜닝
+
+# 6. 추가 학습 함수 (동일)
+def train_model(model, dataloader, criterion, optimizer, num_epochs=5):
+    model.train()
+    
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            # 기울기 초기화
+            optimizer.zero_grad()
+            
+            # 순전파 + 역전파 + 최적화
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            # 통계
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        
+        epoch_loss = running_loss / len(dataloader)
+        epoch_acc = 100 * correct / total
+        print(f'에포크 {epoch+1}/{num_epochs} | 손실: {epoch_loss:.4f} | 정확도: {epoch_acc:.2f}%')
+    
+    return model
+
+folder_path = data_dir
+folder_name = os.path.basename(os.path.normpath(folder_path))
+
+# 만약 폴더 이름이 너무 일반적이면 (예: 'image') 상위 폴더 이름도 가져오기
+if folder_name in ['image', 'images', 'data', 'dataset']:
+    parent_folder = os.path.basename(os.path.dirname(folder_path))
+    folder_name = f"{parent_folder}/{folder_name}"
+
+print(f"'{folder_name}' 폴더의 데이터로 추가 학습을 시작합니다")
+model = train_model(model, full_dataloader, criterion, optimizer, num_epochs=5)
+
+# 8. 새로운 모델 저장
+# timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+# model_name = f"food_allergy_model_{folder_name}_{timestamp}"
+# # 파일명에 사용할 수 없는 문자 제거
+# model_name = "".join([c for c in model_name if c.isalpha() or c.isdigit() or c in ['_', '-']])
+# torch.save(
+#     {"model_state_dict": model.state_dict(), "img_size": 224},
+#     model_name.pt
+# )
+# print(f" 추가 학습 완료! 새로운 모델이 '{model_name}.pt'로 저장됨")
+
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+model_name = f"food_allergy_model_{folder_name}_{timestamp}"
+# 파일명에 쓸 수 없는 문자 제거
+model_name = "".join([c for c in model_name if c.isalpha() or c.isdigit() or c in ['_', '-']])
+
+# output 폴더 경로
+output_dir = "./output"  # 기존 txt 파일 저장 폴더와 동일 경로 사용
+
+# output 폴더 없으면 생성
+os.makedirs(output_dir, exist_ok=True)
+
+# 전체 저장 경로 지정
+model_path = os.path.join(output_dir, f"{model_name}.pt")
+
+torch.save(
+    {"model_state_dict": model.state_dict(), "img_size": 224},
+    model_path
+)
+
+print(f"추가 학습 완료! 새로운 모델이 '{model_path}'로 저장됨")
+
+# 9. 모델 테스트
+def test_model(model, dataloader):
+    model.eval()
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    accuracy = 100 * correct / total
+    print(f'테스트 정확도: {accuracy:.2f}%')
+    return accuracy
+
+test_model(model, full_dataloader) # 전체 데이터로 테스트!
+###
+# 10. 클래스별 정확도 확인하기
+def test_model_per_class(model, dataloader, classes):
+    model.eval()
+    class_correct = [0] * len(classes)
+    class_total = [0] * len(classes)
+    
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+            
+            # 클래스별 정확도 계산
+            for i in range(len(labels)):
+                label = labels[i]
+                class_total[label] += 1
+                if predicted[i] == label:
+                    class_correct[label] += 1
+    
+    # 클래스별 정확도 출력
+    print("\n음식 종류별 정확도:")
+    for i in range(len(classes)):
+        if class_total[i] > 0:  # 데이터가 있는 클래스만
+            accuracy = 100 * class_correct[i] / class_total[i]
+            print(f'- {classes[i]}: {accuracy:.2f}% ({class_correct[i]}/{class_total[i]})')
+        else:
+            print(f'- {classes[i]}: 테스트 데이터 없음')
+    
+    return class_correct, class_total
+
+# 클래스별 정확도 확인
+class_correct, class_total = test_model_per_class(model, full_dataloader, full_dataset.classes)
+
+# 11. 모델 사용 예시 (새 이미지로 예측하기)
+def predict_food(model, image_path, transform, classes):
+    model.eval()
+    
+    # 이미지 불러오기 및 전처리
+    image = Image.open(image_path).convert('RGB')
+    image = transform(image).unsqueeze(0).to(device)  # 배치 차원 추가
+    
+    # 예측
+    with torch.no_grad():
+        outputs = model(image)
+        _, predicted = torch.max(outputs, 1)
+        
+        # 확률 계산 (소프트맥스)
+        probs = torch.nn.functional.softmax(outputs, dim=1)[0]
+        confidence = probs[predicted.item()].item() * 100
+        
+    predicted_class = classes[predicted.item()]
+    
+    print(f"\n예측 결과: '{predicted_class}' (확신도: {confidence:.2f}%)")
+    
+    # 상위 3개 예측 결과 보여주기
+    top3_prob, top3_idx = torch.topk(probs, 3)
+    print("상위 3개 예측:")
+    for i in range(3):
+        print(f"- {classes[top3_idx[i]]}: {top3_prob[i]*100:.2f}%")
+    
+    return predicted_class, confidence
+
+if __name__ == "__main__":
+    # 음식 데이터셋 경로
+    data_directory =  data_dir  # 여기에 실제 경로를 넣어주세요
+    output_directory = '/content/output'  # 텍스트 파일이 저장될 경로
+    
+    # 함수 호출하기!
+    train_and_save_model_with_txt(
+        data_dir=data_directory,
+        output_dir=output_directory,
+        num_epochs=10,
+        batch_size=16,
+        learning_rate=0.00001
+    )
+###
+# 예시: 새로운 이미지로 예측해보기
+# 실제 테스트할 이미지 경로를 넣어주세요!
+# test_image_path = '/content/drive/MyDrive/Food_allergy/test_images/kimchi_stew_test.jpg'
+# predict_food(model, test_image_path, transform, full_dataset.classes)
+
+
+# 수정사항
+# 구글드라이브용
