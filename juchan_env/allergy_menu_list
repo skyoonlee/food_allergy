@@ -8,10 +8,10 @@ allergy_dict = {
     "우유": ["우유", "밀크", "버터", "치즈", "요거트", "분유", "milk"],
     "밀": ["밀", "밀가루", "소맥", "wheat", "글루텐","햄버거","라면","빵"],
     "갑각류": ["새우", "새우살", "대하", "대게", "꽃게", "킹크랩", "랍스터", "게", "crab", "shrimp", "lobster"],
-    "생선": ["생선", "어류", "고등어", "연어", "참치", "삼치", "fish", "mackerel", "salmon", "tuna","북어","황태"],
+    "생선": ["생선", "어류", "고등어", "연어", "참치", "삼치", "fish", "mackerel", "salmon", "tuna","북어","황태","아귀"],
     "돼지고기": ["돼지고기", "돼지", "돈육", "pork"],
     "견과류": ["땅콩", "peanut","호두", "walnut","콩", "대두", "두유", "soybean", "soy","잣"],
-    "조개": ["조개", "홍합", "바지락", "굴", "가리비", "clam", "mussel", "scallop", "oyster"],
+    "조개": ["조개", "홍합", "바지락", "굴", "가리비","관자", "clam", "mussel", "scallop", "oyster"],
     "복숭아": ["복숭아", "peach"],
     "콩": ["콩", "대두", "두유", "soybean", "soy"],
     "사과": ["사과", "apple"],
@@ -23,6 +23,7 @@ allergy_dict = {
     "들깨": ["들깨", "perilla", "perilla seed"],
     "토마토": ["토마토", "tomato","케첩"],
     "오징어": ["오징어", "squid"],
+    "해조류": ["미역", "seaweedquid"], # 추가
     # 필요하면 추가하세요
 }
 
@@ -50,5 +51,7 @@ for row in root.findall(".//row"):
         if any(any(syn in ing for syn in synonyms) for ing in ing_list):
             allergy_foods.append(recipe_name)
             break  # 하나라도 걸리면 그 음식은 알러지 음식
+while "None" in allergy_foods:
+   allergy_foods = words.remove("None")
 
 print("⚠️ 알러지 유발 음식:", allergy_foods, sep="\n")
