@@ -11,8 +11,9 @@ import datetime
 import glob
 import random
 
-drive.mount('/content/gdrive')
-data_dir = '/content/gdrive/MyDrive/Food_allergy/image'
+drive.mount('/content/drive')
+data_dir = '/content/drive/MyDrive/Food_allergy/image'
+
 
 # 1. 커스텀 데이터셋 클래스 만들기
 class FoodDataset(Dataset):
@@ -23,26 +24,25 @@ class FoodDataset(Dataset):
         self.class_to_idx = {}
         idx_counter = 0
 
-        # 모든 하위 디렉토리를 탐색하여 실제 음식 클래스를 찾아요
         for root, dirs, files in os.walk(data_dir):
-            # 현재 root 디렉토리에 파일이 있고 하위 디렉토리가 없다면
-            # 이 root 디렉토리가 바로 실제 음식 클래스 폴더
-            if files and not dirs:
-                class_name = os.path.basename(root) # 폴더 이름을 클래스 이름으로 사용
-                
+            image_files = [f for f in files if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
+
+            if len(image_files) > 0:
+                class_name = os.path.basename(root)
+                print(f"클래스 폴더 발견: {class_name} (이미지 개수: {len(image_files)})")
+
                 if class_name not in self.class_to_idx:
                     self.class_to_idx[class_name] = idx_counter
                     idx_counter += 1
-                
-                for img_name in files:
-                    # 이미지 파일만 추가 (예: .jpg, .png 등)
-                    if img_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
-                        img_path = os.path.join(root, img_name)
-                        self.samples.append((img_path, self.class_to_idx[class_name]))
-        
+
+                for img_name in image_files:
+                    img_path = os.path.join(root, img_name)
+                    self.samples.append((img_path, self.class_to_idx[class_name]))
+
         self.classes = list(self.class_to_idx.keys())
         print(f"총 {len(self.classes)}개의 음식 클래스를 찾음: {self.classes}")
-    
+        print(f"총 샘플 개수(이미지 수): {len(self.samples)}")
+
     def __len__(self):
         return len(self.samples)
     
@@ -158,7 +158,7 @@ transform = transforms.Compose([
 # 3. 새로운 데이터셋 불러오기
 # 이번엔 '김치찌개' 데이터가 포함된 전체 데이터셋 경로를 지정해요.
 # /content/drive/MyDrive/Food_allergy/image/ 이 폴더 안에 구이, 찌개(김치찌개 포함), 볶음 폴더가 있어야 함
-data_dir = '/Users/KCCISTC/Desktop/workspace/food_allergy/test'  # 김치찌개까지 포함된 모든 음식 데이터셋 경로
+
 full_dataset = FoodDataset(data_dir, transform=transform) # FoodDataset 사용하면 모든 하위 폴더의 음식을 클래스로 잘 인식
 full_dataloader = DataLoader(full_dataset, batch_size=16, shuffle=True, num_workers=0)
 
@@ -264,7 +264,7 @@ def train_model(model, dataloader, criterion, optimizer, num_epochs=5):
     
     return model
 
-folder_path = data_dir  # '/content/drive/MyDrive/Food_allergy/image/'
+folder_path = data_dir
 folder_name = os.path.basename(os.path.normpath(folder_path))
 
 # 만약 폴더 이름이 너무 일반적이면 (예: 'image') 상위 폴더 이름도 가져오기
@@ -282,7 +282,7 @@ model_name = f"food_allergy_model_{folder_name}_{timestamp}"
 model_name = "".join([c for c in model_name if c.isalpha() or c.isdigit() or c in ['_', '-']])
 torch.save(
     {"model_state_dict": model.state_dict(), "img_size": 224},
-    "food_allergy_model_{folder_name}_{timestamp}.pt"
+    f"food_allergy_model_{folder_name}_{timestamp}.pt"
 )
 print(f" 추가 학습 완료! 새로운 모델이 '{model_name}.pt'로 저장됨")
 
@@ -370,7 +370,7 @@ def predict_food(model, image_path, transform, classes):
 
 if __name__ == "__main__":
     # 음식 데이터셋 경로
-    data_directory = '/content/drive/MyDrive/Food_allergy/image/'  # 여기에 실제 경로를 넣어주세요
+    data_directory =  data_dir  # 여기에 실제 경로를 넣어주세요
     output_directory = '/content/output'  # 텍스트 파일이 저장될 경로
     
     # 함수 호출하기!
@@ -386,6 +386,10 @@ if __name__ == "__main__":
 # 실제 테스트할 이미지 경로를 넣어주세요!
 # test_image_path = '/content/drive/MyDrive/Food_allergy/test_images/kimchi_stew_test.jpg'
 # predict_food(model, test_image_path, transform, full_dataset.classes)
+
+
+# 수정사항
+# 구글드라이브용
 
 
 # 수정사항
