@@ -25,6 +25,7 @@ log_path = '/content/drive/MyDrive/Food_allergy/epoch_accuracy_log.txt'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+
 # ---------------------------------------------------
 # 1. Dataset 클래스 정의 (가장 하위 폴더 = 클래스)
 # ---------------------------------------------------
@@ -37,7 +38,6 @@ class CustomImageDataset(Dataset):
 
         # 가장 하위 폴더(이미지가 들어있는 폴더)를 클래스 폴더로 인식
         for root, dirs, files in os.walk(root_dir):
-            dirs.sort() # 폴더 순서 고정
             if len(files) > 0:  # 이미지가 들어있는 폴더라면
                 class_name = os.path.basename(root)
                 if class_name not in self.class_to_idx:
@@ -47,10 +47,6 @@ class CustomImageDataset(Dataset):
                 for file in files:
                     if file.lower().endswith(('png','jpg','jpeg','bmp')):
                         self.samples.append((os.path.join(root, file), self.class_to_idx[class_name]))
-
-        print("✅ 클래스 매핑 확인:")
-                for cname, idx in self.class_to_idx.items():
-                    print(f"  {cname} -> {idx}")
 
     def __len__(self):
         return len(self.samples)
@@ -72,16 +68,9 @@ transform = transforms.Compose([
 ])
 
 dataset = CustomImageDataset(data_dir, transform=transform)
-
-# train / test 분포 확인
-train_size = int(0.8 * len(dataset))
+train_size = int(0.7 * len(dataset))
 test_size = len(dataset) - train_size
 train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-print("Train/Test 클래스 분포 확인:")
-train_labels = [label for _, label in train_dataset]
-test_labels = [label for _, label in test_dataset]
-print("Train:", Counter(train_labels))
-print("Test:", Counter(test_labels))
 
 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=2)
 test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=2)
@@ -179,17 +168,13 @@ def evaluate(model, loader, classes, epoch, log_file):
             f.write(f"  {classname}: {acc:.2f}%\n")
         f.write(f"  Overall: {overall_acc:.2f}%\n\n")
 
-    zero_classes = [classes[i] for i, c in enumerate(class_correct) if c == 0 and class_total[i]>0]
-    if zero_classes:
-        print("⚠️ 정확도 0% 클래스:", zero_classes)
-
     print(f"✅ Epoch {epoch+1} 테스트 정확도: {overall_acc:.2f}%")
     return overall_acc
 
 # ---------------------------------------------------
 # 7. 학습 루프
 # ---------------------------------------------------
-num_epochs = 30
+num_epochs = 20
 for epoch in range(start_epoch, num_epochs):
     loss = train(model, train_loader, optimizer, criterion, epoch)
     acc = evaluate(model, test_loader, dataset.classes, epoch, log_path)
@@ -204,7 +189,3 @@ for epoch in range(start_epoch, num_epochs):
     print(f"💾 체크포인트 저장 완료 (epoch {epoch+1})")
 
 print("🎉 학습 완료")
-
-# 최종 추론용 모델 저장
-final_model_path = '/content/drive/MyDrive/Food_allergy/final_model.pt'
-torch.save(model.state_dict(), final_model_path)
