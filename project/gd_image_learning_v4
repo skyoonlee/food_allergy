@@ -134,7 +134,7 @@ def evaluate(model, loader, classes, epoch, log_file):
                     class_correct[label] += 1
 
     overall_acc = 100 * correct / total
-    with open(log_file, "a") as f:
+    with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"Epoch {epoch+1}:\n")
         for i, classname in enumerate(classes):
             acc = 100 * class_correct[i] / class_total[i] if class_total[i] > 0 else 0
@@ -162,6 +162,3 @@ for epoch in range(start_epoch, num_epochs):
     print(f"💾 체크포인트 저장 완료 (epoch {epoch+1})")
 
 print("🎉 학습 완료")
-
-torch.save(model.state_dict(), final_model_path)
-print(f"🎉 학습 완료! 최종 모델 저장: {final_model_path}")
