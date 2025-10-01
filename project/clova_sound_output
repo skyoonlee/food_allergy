@@ -1,0 +1,92 @@
+import requests
+import json
+import os
+import time
+from IPython.display import Audio
+
+def clova_tts(text, speaker="nara", volume=0, pitch=0, speed=0, format="mp3"):
+    """
+    클로바 음성합성 API를 사용하여 텍스트를 음성으로 변환합니다.
+    
+    Args:
+        text (str): 음성으로 변환할 텍스트
+        speaker (str): 화자 (nara, clara, matt 등)
+        volume (int): 볼륨 (-5~5)
+        pitch (int): 피치 (-5~5)
+        speed (int): 속도 (-5~5)
+        format (str): 파일 포맷 (mp3, wav)
+    
+    Returns:
+        str: 저장된 오디오 파일 경로
+    """
+    # API 정보 설정
+    client_id = "YOUR_CLOVA_CLIENT_ID"      # 여기에 발급받은 클라이언트 ID 입력
+    client_secret = "YOUR_CLOVA_CLIENT_SECRET"  # 여기에 발급받은 시크릿 키 입력
+    
+    # API 엔드포인트 URL
+    url = "https://naveropenapi.apigw.ntruss.com/tts-premium/v1/tts"
+    
+    # 헤더 설정
+    headers = {
+        "X-NCP-APIGW-API-KEY-ID": client_id,
+        "X-NCP-APIGW-API-KEY": client_secret,
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    
+    # 요청 데이터 설정
+    data = {
+        "speaker": speaker,
+        "volume": volume,
+        "speed": speed,
+        "pitch": pitch,
+        "text": text,
+        "format": format
+    }
+    
+    # API 요청
+    response = requests.post(url, headers=headers, data=data)
+    
+    # 결과 처리
+    if response.status_code == 200:
+        # 현재 시간으로 파일명 생성
+        timestamp = int(time.time())
+        file_name = f"tts_{timestamp}.{format}"
+        
+        # 파일로 저장
+        with open(file_name, "wb") as f:
+            f.write(response.content)
+        
+        print(f"음성 파일이 '{file_name}'에 저장되었습니다!")
+        return file_name
+    else:
+        print(f"오류 발생: {response.status_code}")
+        return None
+
+# 알레르기 탐지 결과에 따른 TTS 실행 예시
+def announce_allergy_result(detected_allergens):
+    """
+    알레르기 탐지 결과를 음성으로 안내합니다.
+    
+    Args:
+        detected_allergens (list): 탐지된 알레르기 성분 리스트
+    """
+    if not detected_allergens:
+        message = "알레르기 성분이 발견되지 않았습니다. 안심하고 드셔도 됩니다."
+    else:
+        allergens_text = ", ".join(detected_allergens)
+        message = f"주의하세요! 이 음식에서 {allergens_text} 알레르기 성분이 발견되었습니다."
+    
+    # 음성 파일 생성
+    audio_file = clova_tts(message, speaker="nara")
+    
+    # 주피터 노트북에서 바로 재생 (선택사항)
+    if audio_file and 'IPython' in globals():
+        return Audio(audio_file)
+    
+    return audio_file
+
+# 사용 예시
+if __name__ == "__main__":
+    # 알레르기 탐지 모델이 땅콩과 유제품 알레르기를 탐지했다고 가정
+    detected_allergens = ["땅콩", "유제품"]
+    announce_allergy_result(detected_allergens)
