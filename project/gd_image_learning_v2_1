@@ -18,7 +18,6 @@ from sklearn.model_selection import train_test_split
 
 drive.mount('/content/drive')
 data_dir = '/content/drive/MyDrive/Food_allergy/image'
-
 # 1. 커스텀 데이터셋 클래스 만들기
 class FoodDataset(Dataset):
     def __init__(self, data_dir, transform=None):
@@ -73,34 +72,52 @@ class FoodDataset(Dataset):
                 # 최후의 수단: 랜덤 텐서 생성
                 dummy_image = torch.randn(3, 224, 224)
                 return dummy_image, label
-def train_and_save_model_with_txt(data_dir, output_dir="./output", num_epochs=10, batch_size=16, learning_rate=0.00001):
+import os
+import random
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Dataset
 
-classes = os.listdir(data_dir)
-all_images = []
-
-for class_name in classes:
-    class_path = os.path.join(data_dir, class_name)
-    if os.path.isdir(class_path):
-        for img_name in os.listdir(class_path):
-            if img_name.endswith(('.jpg', '.jpeg', '.png')):
-                img_path = os.path.join(class_name, img_name)
-                all_images.append((img_path, class_name))
-
-# 데이터 분할 (8:2 비율로 훈련/테스트 세트 분할)
-train_data, test_data = train_test_split(all_images, test_size=0.2, random_state=42, stratify=[x[1] for x in all_images])
-
-# 훈련 데이터와 테스트 데이터를 별도의 txt 파일로 저장
-with open('train.txt', 'w') as f:
-    for img_path, class_name in train_data:
-        f.write(f"{img_path} {classes.index(class_name)}\n")
-
-with open('test.txt', 'w') as f:
-    for img_path, class_name in test_data:
-        f.write(f"{img_path} {classes.index(class_name)}\n")
-
-print(f"총 {len(all_images)}개의 이미지 중 {len(train_data)}개는 학습용, {len(test_data)}개는 테스트용으로 나눴어요!")
-    # 모델을 학습시키고 pt 파일과 txt 파일을 동시에 생성하는 함수
+def train_and_save_model_with_txt(data_dir, output_dir="./output", num_epochs=10, batch_size=32, learning_rate=0.00001):
+    # 폴더가 없으면 생성
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     
+    # 클래스별 이미지 파일 수집
+    classes = os.listdir(data_dir)
+    all_images = []
+
+    for class_name in classes:
+        class_path = os.path.join(data_dir, class_name)
+        if os.path.isdir(class_path):
+            for img_name in os.listdir(class_path):
+                if img_name.endswith(('.jpg', '.jpeg', '.png')):
+                    img_path = os.path.join(class_name, img_name)
+                    all_images.append((img_path, class_name))
+
+    # 데이터 분할 (8:2 비율로 훈련/테스트 세트 분할)
+    train_data, test_data = train_test_split(all_images, test_size=0.2, random_state=42, stratify=[x[1] for x in all_images])
+
+    # 훈련 데이터와 테스트 데이터를 별도의 txt 파일로 저장
+    train_txt_path = os.path.join(output_dir, 'train.txt')
+    test_txt_path = os.path.join(output_dir, 'test.txt')
+    
+    with open(train_txt_path, 'w') as f:
+        for img_path, class_name in train_data:
+            f.write(f"{img_path} {classes.index(class_name)}\n")
+
+    with open(test_txt_path, 'w') as f:
+        for img_path, class_name in test_data:
+            f.write(f"{img_path} {classes.index(class_name)}\n")
+
+    print(f"총 {len(all_images)}개의 이미지 중 {len(train_data)}개는 학습용, {len(test_data)}개는 테스트용으로 나눴어요!")
+    print(f"txt 파일이 {output_dir} 폴더에 저장되었어요!")
+    
+    return train_txt_path, test_txt_path
+
+# 사용 예시
+
+
+
     # Args:
     #     data_dir: 이미지 데이터가 있는 폴더 경로
     #     output_dir: 출력 파일들이 저장될 폴더 경로
@@ -108,72 +125,74 @@ print(f"총 {len(all_images)}개의 이미지 중 {len(train_data)}개는 학습
     #     batch_size: 배치 사이즈
     #     learning_rate: 학습률
     
-    # 출력 폴더 생성
-    os.makedirs(output_dir, exist_ok=True)
+# 출력 폴더 생성
+output_dir = "./output"
+os.makedirs(output_dir, exist_ok=True)
+
+
+# 현재 시간으로 타임스탬프 생성
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# 1. 데이터 전처리 정의
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(10),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
     
-    # 현재 시간으로 타임스탬프 생성
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+# 2. 데이터셋 불러오기
+full_dataset = FoodDataset(data_dir, transform=transform)
+
+# 3. txt 파일 생성 부분
+# 클래스 매핑 파일 생성
+class_mapping_file = os.path.join(output_dir, f"class_mapping_{timestamp}.txt")
+with open(class_mapping_file, 'w', encoding='utf-8') as f:
+    for class_name, idx in full_dataset.class_to_idx.items():
+        f.write(f"{class_name}: {idx}\n")
+
+print(f"클래스 매핑 파일 생성 완료: {class_mapping_file}")
+
+# 데이터셋 파일 생성
+all_samples = []
+class_counts = {}
+
+for img_path, label in full_dataset.samples:
+    class_name = full_dataset.classes[label]
+    rel_path = os.path.relpath(img_path, start=data_dir)
+    all_samples.append((rel_path, label))
     
-    # 1. 데이터 전처리 정의
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    
-    # 2. 데이터셋 불러오기
-    full_dataset = FoodDataset(data_dir, transform=transform)
-    
-    # 3. txt 파일 생성 부분
-    # 클래스 매핑 파일 생성
-    class_mapping_file = os.path.join(output_dir, f"class_mapping_{timestamp}.txt")
-    with open(class_mapping_file, 'w', encoding='utf-8') as f:
-        for class_name, idx in full_dataset.class_to_idx.items():
-            f.write(f"{class_name}: {idx}\n")
-    
-    print(f"클래스 매핑 파일 생성 완료: {class_mapping_file}")
-    
-    # 데이터셋 파일 생성
-    all_samples = []
-    class_counts = {}
-    
-    for img_path, label in full_dataset.samples:
-        class_name = full_dataset.classes[label]
-        rel_path = os.path.relpath(img_path, start=data_dir)
-        all_samples.append((rel_path, label))
-        
-        if class_name not in class_counts:
-            class_counts[class_name] = 0
-        class_counts[class_name] += 1
-    
-    # 전체 데이터셋 파일 생성
-    dataset_file = os.path.join(output_dir, f"dataset_{timestamp}.txt")
-    with open(dataset_file, 'w', encoding='utf-8') as f:
-        for img_path, label in all_samples:
-            f.write(f"{img_path} {label}\n")
-    
-    print(f"전체 데이터셋 파일 생성 완료: {dataset_file} (총 {len(all_samples)}개 이미지)")
-    
-    # 학습/검증 분할 파일 생성 (8:2 비율)
-    random.shuffle(all_samples)
-    split_idx = int(len(all_samples) * 0.8)
-    train_samples = all_samples[:split_idx]
-    val_samples = all_samples[split_idx:]
-    
-    train_file = os.path.join(output_dir, f"train_{timestamp}.txt")
-    with open(train_file, 'w', encoding='utf-8') as f:
-        for img_path, label in train_samples:
-            f.write(f"{img_path} {label}\n")
-    
-    val_file = os.path.join(output_dir, f"val_{timestamp}.txt")
-    with open(val_file, 'w', encoding='utf-8') as f:
-        for img_path, label in val_samples:
-            f.write(f"{img_path} {label}\n")
-    
-    print(f"학습 데이터셋 파일 생성 완료: {train_file} (총 {len(train_samples)}개 이미지)")
-    print(f"검증 데이터셋 파일 생성 완료: {val_file} (총 {len(val_samples)}개 이미지)")
+    if class_name not in class_counts:
+        class_counts[class_name] = 0
+    class_counts[class_name] += 1
+
+# 전체 데이터셋 파일 생성
+dataset_file = os.path.join(output_dir, f"dataset_{timestamp}.txt")
+with open(dataset_file, 'w', encoding='utf-8') as f:
+    for img_path, label in all_samples:
+        f.write(f"{img_path} {label}\n")
+
+print(f"전체 데이터셋 파일 생성 완료: {dataset_file} (총 {len(all_samples)}개 이미지)")
+
+# 학습/검증 분할 파일 생성 (8:2 비율)
+random.shuffle(all_samples)
+split_idx = int(len(all_samples) * 0.8)
+train_samples = all_samples[:split_idx]
+val_samples = all_samples[split_idx:]
+
+train_file = os.path.join(output_dir, f"train_{timestamp}.txt")
+with open(train_file, 'w', encoding='utf-8') as f:
+    for img_path, label in train_samples:
+        f.write(f"{img_path} {label}\n")
+
+val_file = os.path.join(output_dir, f"val_{timestamp}.txt")
+with open(val_file, 'w', encoding='utf-8') as f:
+    for img_path, label in val_samples:
+        f.write(f"{img_path} {label}\n")
+
+print(f"학습 데이터셋 파일 생성 완료: {train_file} (총 {len(train_samples)}개 이미지)")
+print(f"검증 데이터셋 파일 생성 완료: {val_file} (총 {len(val_samples)}개 이미지)")
 
 
 
@@ -191,7 +210,7 @@ transform = transforms.Compose([
 # /content/drive/MyDrive/Food_allergy/image/ 이 폴더 안에 구이, 찌개(김치찌개 포함), 볶음 폴더가 있어야 함
 
 full_dataset = FoodDataset(data_dir, transform=transform) # FoodDataset 사용하면 모든 하위 폴더의 음식을 클래스로 잘 인식
-full_dataloader = DataLoader(full_dataset, batch_size=16, shuffle=True, num_workers=0)
+full_dataloader = DataLoader(full_dataset, batch_size=32, shuffle=True, num_workers=0)
 
 # 4. 기존 모델 불러오기 및 업데이트
 model = None
@@ -263,7 +282,7 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.00001)  # 아주 낮은 학습률로 파인튜닝
 
 # 6. 추가 학습 함수 (동일)
-def train_model(model, dataloader, criterion, optimizer, num_epochs=5):
+def train_model(model, dataloader, criterion, optimizer, num_epochs=10):
     model.train()
     
     for epoch in range(num_epochs):
@@ -304,7 +323,7 @@ if folder_name in ['image', 'images', 'data', 'dataset']:
     folder_name = f"{parent_folder}/{folder_name}"
 
 print(f"'{folder_name}' 폴더의 데이터로 추가 학습을 시작합니다")
-model = train_model(model, full_dataloader, criterion, optimizer, num_epochs=5)
+model = train_model(model, full_dataloader, criterion, optimizer, num_epochs=10)
 
 # 8. 새로운 모델 저장
 # timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
@@ -424,15 +443,17 @@ if __name__ == "__main__":
     # 음식 데이터셋 경로
     data_directory =  data_dir  # 여기에 실제 경로를 넣어주세요
     output_directory = '/content/output'  # 텍스트 파일이 저장될 경로
-    
+    train_path, test_path = train_and_save_model_with_txt(data_directory)
+
     # 함수 호출하기!
     train_and_save_model_with_txt(
         data_dir=data_directory,
         output_dir=output_directory,
         num_epochs=10,
-        batch_size=16,
+        batch_size=32,
         learning_rate=0.00001
     )
+   
 ###
 # 예시: 새로운 이미지로 예측해보기
 # 실제 테스트할 이미지 경로를 넣어주세요!
