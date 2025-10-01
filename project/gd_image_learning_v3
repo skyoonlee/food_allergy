@@ -1,0 +1,160 @@
+import torch # 텐서 생성, 연산
+import torch.nn as nn # 신경망의 층 관련 라이브러리
+import torch.optim as optim # 최적화 알고리즘
+from torch.utils.data import DataLoader, Dataset, random_split
+from torchvision import transforms, models
+import numpy as np
+from google.colab import drive
+import os
+from PIL import Image
+import datetime
+import glob
+import random
+from torch.utils.data import DataLoader, TensorDataset # TensorDataset -> X, y를 텐서형태로 나누기
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder # label 전처리
+from tqdm.notebook import tqdm # 에포크 상황 확인하기
+from sklearn.model_selection import train_test_split
+
+drive.mount('/content/drive')
+data_dir = '/content/drive/MyDrive/Food_allergy/image'
+checkpoint_path = '/content/drive/MyDrive/Food_allergy/checkpoint.pth'
+
+# ---------------------------
+# 2. 커스텀 데이터셋 (하위폴더까지 탐색)
+# ---------------------------
+class CustomImageDataset(Dataset):
+    def __init__(self, root_dir, transform=None):
+        self.samples = []
+        self.classes = []
+        self.class_to_idx = {}
+        self.transform = transform
+
+        for root, dirs, files in os.walk(root_dir):
+            for fname in files:
+                if fname.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
+                    class_name = os.path.basename(root)
+                    if class_name not in self.class_to_idx:
+                        self.class_to_idx[class_name] = len(self.classes)
+                        self.classes.append(class_name)
+                    path = os.path.join(root, fname)
+                    label = self.class_to_idx[class_name]
+                    self.samples.append((path, label))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+        image = Image.open(path).convert("RGB")
+        if self.transform:
+            image = self.transform(image)
+        return image, label
+
+# ---------------------------
+# 3. 데이터 전처리 정의
+# ---------------------------
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406], 
+                         [0.229, 0.224, 0.225])
+])
+
+dataset = CustomImageDataset(root_dir=data_dir, transform=transform)
+print("클래스 목록:", dataset.classes)
+
+# Train/Val Split
+train_size = int(0.8 * len(dataset))
+val_size = len(dataset) - train_size
+train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=2)
+val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=2)
+
+# ---------------------------
+# 4. 모델 (ResNet18)
+# ---------------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("사용 장치:", device)
+
+model = models.resnet18(pretrained=True)
+num_features = model.fc.in_features
+model.fc = nn.Linear(num_features, len(dataset.classes))
+model = model.to(device)
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+start_epoch = 0
+
+# ---------------------------
+# 5. 체크포인트 불러오기 (있으면 이어서 학습)
+# ---------------------------
+if os.path.exists(checkpoint_path):
+    print(f"체크포인트 불러오는 중: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state'])
+    optimizer.load_state_dict(checkpoint['optimizer_state'])
+    start_epoch = checkpoint['epoch'] + 1
+    print(f"👉 이어서 학습 시작 (epoch {start_epoch})")
+else:
+    print("체크포인트 없음, 처음부터 학습 시작")
+
+# ---------------------------
+# 6. 학습 함수
+# ---------------------------
+def train_model(model, train_loader, val_loader, criterion, optimizer, epochs=10):
+    global start_epoch
+    for epoch in range(start_epoch, epochs):
+        model.train()
+        running_loss, running_corrects = 0.0, 0
+
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            _, preds = torch.max(outputs, 1)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item() * inputs.size(0)
+            running_corrects += torch.sum(preds == labels.data)
+
+        epoch_loss = running_loss / len(train_loader.dataset)
+        epoch_acc = running_corrects.double() / len(train_loader.dataset)
+
+        # Validation
+        model.eval()
+        val_loss, val_corrects = 0.0, 0
+        with torch.no_grad():
+            for inputs, labels in val_loader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                _, preds = torch.max(outputs, 1)
+
+                val_loss += loss.item() * inputs.size(0)
+                val_corrects += torch.sum(preds == labels.data)
+
+        val_loss /= len(val_loader.dataset)
+        val_acc = val_corrects.double() / len(val_loader.dataset)
+
+        print(f"Epoch {epoch+1}/{epochs}: "
+              f"Train Loss: {epoch_loss:.4f}, Train Acc: {epoch_acc:.4f}, "
+              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+
+        # 🔥 체크포인트 저장
+        torch.save({
+            'epoch': epoch,
+            'model_state': model.state_dict(),
+            'optimizer_state': optimizer.state_dict()
+        }, checkpoint_path)
+        print(f"✅ 체크포인트 저장 완료: {checkpoint_path}")
+
+    return model
+
+# ---------------------------
+# 7. 학습 실행
+# ---------------------------
+model = train_model(model, train_loader, val_loader, criterion, optimizer, epochs=10)
