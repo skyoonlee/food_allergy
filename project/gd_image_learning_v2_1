@@ -1,6 +1,6 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import torch # 텐서 생성, 연산
+import torch.nn as nn # 신경망의 층 관련 라이브러리
+import torch.optim as optim # 최적화 알고리즘
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms, models
 import numpy as np
@@ -10,6 +10,11 @@ from PIL import Image
 import datetime
 import glob
 import random
+from torch.utils.data import DataLoader, TensorDataset # TensorDataset -> X, y를 텐서형태로 나누기
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder # label 전처리
+from tqdm.notebook import tqdm # 에포크 상황 확인하기
+from sklearn.model_selection import train_test_split
 
 drive.mount('/content/drive')
 data_dir = '/content/drive/MyDrive/Food_allergy/image'
@@ -69,7 +74,31 @@ class FoodDataset(Dataset):
                 dummy_image = torch.randn(3, 224, 224)
                 return dummy_image, label
 def train_and_save_model_with_txt(data_dir, output_dir="./output", num_epochs=10, batch_size=16, learning_rate=0.00001):
- 
+
+classes = os.listdir(data_dir)
+all_images = []
+
+for class_name in classes:
+    class_path = os.path.join(data_dir, class_name)
+    if os.path.isdir(class_path):
+        for img_name in os.listdir(class_path):
+            if img_name.endswith(('.jpg', '.jpeg', '.png')):
+                img_path = os.path.join(class_name, img_name)
+                all_images.append((img_path, class_name))
+
+# 데이터 분할 (8:2 비율로 훈련/테스트 세트 분할)
+train_data, test_data = train_test_split(all_images, test_size=0.2, random_state=42, stratify=[x[1] for x in all_images])
+
+# 훈련 데이터와 테스트 데이터를 별도의 txt 파일로 저장
+with open('train.txt', 'w') as f:
+    for img_path, class_name in train_data:
+        f.write(f"{img_path} {classes.index(class_name)}\n")
+
+with open('test.txt', 'w') as f:
+    for img_path, class_name in test_data:
+        f.write(f"{img_path} {classes.index(class_name)}\n")
+
+print(f"총 {len(all_images)}개의 이미지 중 {len(train_data)}개는 학습용, {len(test_data)}개는 테스트용으로 나눴어요!")
     # 모델을 학습시키고 pt 파일과 txt 파일을 동시에 생성하는 함수
     
     # Args:
@@ -412,4 +441,4 @@ if __name__ == "__main__":
 
 
 # 수정사항
-# 구글드라이브용
+# 테스트 위해서 데이터 분할 구문 추가
