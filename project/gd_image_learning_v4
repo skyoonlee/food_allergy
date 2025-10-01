@@ -1,4 +1,30 @@
 
+import torch # 텐서 생성, 연산
+import torch.nn as nn # 신경망의 층 관련 라이브러리
+import torch.optim as optim # 최적화 알고리즘
+from torch.utils.data import DataLoader, Dataset, random_split, Subset
+from torchvision import transforms, models, datasets
+import numpy as np
+from google.colab import drive
+import os
+from PIL import Image
+import datetime
+import glob
+import random
+from torch.utils.data import DataLoader, TensorDataset # TensorDataset -> X, y를 텐서형태로 나누기
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder # label 전처리
+from tqdm.notebook import tqdm # 에포크 상황 확인하기
+from sklearn.model_selection import train_test_split
+
+drive.mount('/content/drive')
+data_dir = '/content/drive/MyDrive/Food_allergy/image'
+checkpoint_path = '/content/drive/MyDrive/Food_allergy/checkpoint.pth'
+log_path = '/content/drive/MyDrive/Food_allergy/epoch_accuracy_log.txt'
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 # ---------------------------------------------------
 # 1. Dataset 클래스 정의 (가장 하위 폴더 = 클래스)
 # ---------------------------------------------------
