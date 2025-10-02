@@ -26,14 +26,15 @@ class CustomImageDataset(Dataset):
         self.transform = transform
 
         for root, dirs, files in os.walk(root_dir):
-            if len(files) > 0:
-                class_name = os.path.basename(root)
-                if class_name not in self.class_to_idx:
-                    self.class_to_idx[class_name] = len(self.classes)
-                    self.classes.append(class_name)
-                for file in files:
-                    if file.lower().endswith(('png','jpg','jpeg','bmp')):
-                        self.samples.append((os.path.join(root, file), self.class_to_idx[class_name]))
+          dirs.sort()
+          if len(files) > 0:
+            class_name = os.path.basename(root)
+            if class_name not in self.class_to_idx:
+                self.class_to_idx[class_name] = len(self.classes)
+                self.classes.append(class_name)
+            for file in files:
+                if file.lower().endswith(('png','jpg','jpeg','bmp')):
+                    self.samples.append((os.path.join(root, file), self.class_to_idx[class_name]))
 
         if len(self.samples) == 0:
             raise ValueError(f"데이터가 없습니다! {root_dir} 경로를 확인하세요.")
