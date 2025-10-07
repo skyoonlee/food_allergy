@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<title>{{ t.title }}</title>
+</head>
+<body>
+<h1>{{ t.title }}</h1>
+<form action="/result" method="post" enctype="multipart/form-data">
+    <input type="file" name="image" required><br><br>
+    {% for code,name in allergens %}
+    <input type="checkbox" name="allergens" value="{{ code }}">{{ name }}
+    {% endfor %}
+    <br><br>
+    <button type="submit">{{ t.upload }}</button>
+</form>
+</body>
+</html>

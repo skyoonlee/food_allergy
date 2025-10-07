@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<title>{{ t.title }}</title>
+</head>
+<body>
+<h1>{{ t.title }}</h1>
+<img src="{{ img_url }}" width="300"><br>
+<p>{{ t.detect }}: {{ food_name }} ({{ "%.2f"|format(food_prob*100) }}%)</p>
+<h3>{{ t.top3 }}</h3>
+<ul>
+{% for name, prob in top3 %}
+<li>{{ name }}: {{ "%.2f"|format(prob*100) }}%</li>
+{% endfor %}
+</ul>
+{% if allergy_hits %}
+<p>{{ t.allergen_warning }}: {{ allergy_hits|join(", ") }}</p>
+{% endif %}
+<a href="/?lang={{ request.args.get('lang','ko') }}">🔄 다시 검사</a>
+</body>
+</html>
