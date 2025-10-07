@@ -1,0 +1,202 @@
+# 로고 복사
+src_logo = os.path.join(os.getcwd(), "logo.png")
+dst_logo = os.path.join(STATIC_DIR, "logo.png")
+if os.path.exists(src_logo) and not os.path.exists(dst_logo):
+    shutil.copy(src_logo, dst_logo)
+
+# ------------------ Flask 앱 ------------------
+app = Flask(__name__, static_folder='static', static_url_path='/static')
+app.secret_key = "YOUR_SECRET_KEY"
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
+app.config['MAX_FORM_MEMORY_SIZE'] = 16 * 1024 * 1024
+app.config['MAX_FORM_PARTS'] = 5000
+
+# ------------------ 다국어 문구 ------------------
+TEXTS = {
+    "ko": {"title": "음식 알러지 검사", "detect": "탐지된 음식", "top3": "Top3 확률"},
+    "en": {"title": "Food Allergy Detection", "detect": "Detected Food", "top3": "Top3 Probabilities"}
+}
+
+# ------------------ 알러지 정보 ------------------
+ALLERGENS = [
+    ("계란", "계란/난류"), ("우유", "우유"), ("밀", "밀"),
+    ("갑각류", "갑각류"), ("생선", "생선"), ("돼지고기", "돼지고기"),
+    ("견과류", "견과류"), ("조개", "조개"), ("복숭아", "복숭아"),
+    ("콩", "콩"), ("사과", "사과"), ("닭고기", "닭고기"), ("메밀", "메밀"),
+    ("쇠고기", "쇠고기"), ("키위", "키위"), ("아몬드", "아몬드"),
+    ("들깨", "들깨"), ("토마토", "토마토"), ("오징어", "오징어")
+]
+ALLERGEN_MAP = {k:v for k,v in ALLERGENS}
+
+# 알러지 동의어
+ALLERGEN_ING_SYNONYMS = {
+    "계란": ["계란","달걀","에그","난백","난황","egg"],
+    "우유": ["우유","밀크","버터","치즈","요거트","분유","milk"],
+    "밀": ["밀","밀가루","소맥","wheat","글루텐","햄버거","라면","빵"],
+    # ... 나머지 생략 (위와 동일)
+}
+
+# ------------------ 모델 로드 ------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def load_label_map(path="label_map.txt"):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            cls = [ln.strip() for ln in f if ln.strip()]
+        if cls: return cls
+    return ["bibimbap","kimchi_stew","ramyeon","bulgogi","tteokbokki","kimbap","jajangmyeon","jjamppong"]
+
+CLASS_NAMES = load_label_map()
+NUM_CLASSES = len(CLASS_NAMES)
+
+def load_model_exact(pt_path):
+    checkpoint = torch.load(pt_path, map_location=device)
+    state_dict = checkpoint.get('state_dict', checkpoint) if isinstance(checkpoint, dict) else checkpoint
+    num_classes_ckpt = state_dict['fc.weight'].shape[0]
+    model = models.resnet18(weights=None)
+    in_features = model.fc.in_features
+    model.fc = nn.Linear(in_features, num_classes_ckpt)
+
+    new_state_dict = OrderedDict()
+    for k,v in state_dict.items():
+        if k.startswith("module."): k = k[7:]
+        new_state_dict[k] = v
+
+    model.load_state_dict(new_state_dict)
+    model.to(device).eval()
+    return model, num_classes_ckpt
+
+MODEL, NUM_CLASSES = load_model_exact("allergy_project/final_model_e50_b16_lr0001_acc93_75.pt")
+
+# ------------------ 이미지 전처리 ------------------
+IMG_SIZE = 224
+TFMS = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
+])
+MAX_UPLOAD_WIDTH = 1280
+
+def resize_if_large(img: Image.Image, max_w=MAX_UPLOAD_WIDTH):
+    if img.width > max_w:
+        h = int(img.height * (max_w / img.width))
+        return img.resize((max_w, h))
+    return img
+
+def save_temp_image(img_pil: Image.Image):
+    token = uuid.uuid4().hex
+    path = os.path.join(TMP_DIR, f"{token}.jpg")
+    img_pil.save(path, format="JPEG", quality=90)
+    return token, path
+
+def load_temp_image(token: str):
+    path = os.path.join(TMP_DIR, f"{token}.jpg")
+    if not (token and os.path.exists(path)):
+        abort(400, "임시 이미지가 만료되었거나 존재하지 않습니다.")
+    return Image.open(path).convert("RGB"), path
+
+# ------------------ HTML 예시 ------------------
+RESULT_HTML = """
+<h1>{{ t.title }}</h1>
+<img src="{{ img_url }}" width="300">
+<p>{{ t.detect }}: {{ food_name }} ({{ "%.2f"|format(food_prob*100) }}%)</p>
+<h3>{{ t.top3 }}</h3>
+<ul>
+{% for name, prob in top3 %}
+<li>{{ name }}: {{ "%.2f"|format(prob*100) }}%</li>
+{% endfor %}
+</ul>
+{% if allergy_hits %}
+<p>⚠️ 알러지 주의: {{ allergy_hits|join(", ") }}</p>
+{% endif %}
+{% if avoid_hits %}
+<p>회피 식재료 포함: {{ avoid_hits|join(", ") }}</p>
+{% endif %}
+"""
+
+# ------------------ 라우팅 ------------------
+@app.route("/", methods=["GET"])
+def index():
+    lang = request.args.get("lang","ko")
+    texts = TEXTS.get(lang, TEXTS["ko"])
+    return render_template_string("""
+        <h1>{{ t.title }}</h1>
+        <form action="/result" method="post" enctype="multipart/form-data">
+            <input type="file" name="image"><br>
+            {% for code,name in allergens %}
+            <input type="checkbox" name="allergens" value="{{ code }}">{{ name }}
+            {% endfor %}
+            <br><input type="submit" value="검사">
+        </form>
+    """, t=texts, allergens=ALLERGENS, lang=lang)
+
+@app.route("/result", methods=["POST"])
+def result():
+    lang = session.get("lang", "ko")
+    t = TEXTS.get(lang, TEXTS["ko"])
+    
+    # 이미지 처리
+    img = None
+    token = None
+    if "image" in request.files and request.files["image"].filename != "":
+        raw = request.files["image"].read()
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        img = resize_if_large(img)
+        token, _ = save_temp_image(img)
+    else:
+        token = request.form.get("img_token", "")
+        img, _ = load_temp_image(token)
+    
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    img_data_url = f"data:image/jpeg;base64,{img_b64}"
+    
+    # 알러지 정보 처리
+    selected_allergen_codes = request.form.getlist("allergens")
+    allergens_kr = [ALLERGEN_MAP.get(code, code) for code in selected_allergen_codes]
+    avoid_foods = [s.strip() for s in request.form.getlist("avoid_foods") if s.strip()]
+
+    # 모델 추론
+    img_tensor = TFMS(img).unsqueeze(0).to(device)
+    with torch.no_grad():
+        logits = MODEL(img_tensor)
+        probs = torch.softmax(logits, dim=1)[0].cpu().tolist()
+    pairs = list(zip(CLASS_NAMES, probs))
+    pairs.sort(key=lambda t: t[1], reverse=True)
+    food_name = pairs[0][0]
+    food_prob = float(pairs[0][1])
+
+    # XML 기반 알러지/회피
+    allergy_hits, avoid_hits = [], []
+    try:
+        tree = ET.parse("api_xml.xml")
+        root = tree.getroot()
+        data = [{"레시피명": r.findtext("RCP_NM","").strip(), "재료정보": r.findtext("RCP_PARTS_DTLS","").strip()} for r in root.iter("row")]
+        df = pd.DataFrame([d for d in data if d["레시피명"] and d["재료정보"]])
+        
+        def fuzzy_search(df, query, threshold=80):
+            return [row["레시피명"] for _,row in df.iterrows() if fuzz.partial_ratio(query,row["재료정보"])>=threshold]
+        
+        for a in allergens_kr:
+            for syn in ALLERGEN_ING_SYNONYMS.get(a,[a]):
+                allergy_hits.extend(fuzzy_search(df,syn))
+        for f in avoid_foods:
+            avoid_hits.extend(fuzzy_search(df,f))
+    except FileNotFoundError:
+        print("⚠️ api_xml.xml 파일 없음")
+
+    return render_template_string(
+        RESULT_HTML,
+        t=t, lang=lang,
+        img_url=img_data_url,
+        food_name=food_name,
+        food_prob=food_prob,
+        top3=pairs[:3],
+        allergy_hits=allergy_hits,
+        avoid_hits=avoid_hits
+    )
+
+# ------------------ 앱 실행 ------------------
+if __name__ == "__main__":
+    app.run(debug=True, port=8000)
