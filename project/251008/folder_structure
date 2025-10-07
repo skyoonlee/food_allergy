@@ -1,0 +1,13 @@
+project_folder/
+│ app.py
+│ allergy_project/
+│   final_model_e50_b16_lr0001_acc93_75.pt
+│ static/
+│   style.css
+│   logo.png
+│ templates/
+│   index.html
+│   result.html
+│ tmp/   ← 임시 이미지 저장
+│ api_xml.xml   ← 레시피/재료 데이터
+│ label_map.txt ← 클래스 라벨
