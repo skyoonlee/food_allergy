@@ -687,7 +687,7 @@ RESULT_HTML = BASE_CSS + """
               </div>
             {% endfor %}
           {% else %}
-            <div class="pill ok" style="display:block;margin:6px 0;" data-ko-key="no_allergy_hit">해당 음식에는 체크하신 알러지를 유발하는 재료가 들어있지 않아요.</div>
+            <div class="pill ok" style="display:block;margin:6px 0;" data-ko-key="no_allergy_hit">해당 음식에는 체크하신 알러지를 유발하는 재료가 들어있지 않습니다.</div>
           {% endif %}
         </div>
 
@@ -711,7 +711,7 @@ RESULT_HTML = BASE_CSS + """
           {# 입력한 재료 포함 여부 안내 문구 #}
             {% if avoid_hits and avoid_hits|length > 0 %}
               <div class="small" style="margin-top:8px">
-                <div class="pill warn" style="display:block;margin:6px 0;" data-ko-key="no_allergy_hit">해당 음식에는 입력하신 {{ (avoid_hits | map(attribute='term') | unique | join(', ')) }}가 포함되어 있습니다.
+                <div class="pill warn" style="display:block;margin:6px 0;" data-ko-key="no_allergy_hit">해당 음식에는 입력하신 {{ (avoid_hits | map(attribute='term') | unique | join(', ')) }}(이)가 포함되어 있습니다.
               </div>
             {% elif any_input %}
               <div class="small" style="margin-top:8px">
@@ -800,13 +800,13 @@ RESULT_HTML = BASE_CSS + """
       if (avoidHits.length > 0) {
         const avoidNames = avoidHits.map(h => h.term).join(", "); // 재료 이름 자체는 번역하지 않고 그대로 사용
         if (lang === 'ko') {
-            parts.push(`피하고 싶은 재료가 포함되었습니다: ${avoidNames}.`);
+            parts.push(`그리고 해당 음식에는 ${avoidNames}(이)가 포함되었습니다.`);
         } else {
-            parts.push(`Ingredients you wish to avoid are included: ${avoidNames}.`);
+            parts.push(`${avoidNames} you wish to avoid are included.`);
         }
       } else {
         if (lang === 'ko') {
-            parts.push("입력하신 피하고 싶은 재료는 포함되지 않았습니다.");
+            parts.push("그리고 해당 음식에는 피하고 싶은 재료가 포함되지 않았습니다.);
         } else {
             parts.push("The ingredients you entered were not included.");
         }
@@ -922,7 +922,7 @@ RESULT_HTML = BASE_CSS + """
 
     // 2. Local Storage 업데이트
     if (updateLocalStorage) {
-        localStorage.setItem('appLang', lang);     
+        localStorage.setItem('appLang', lang);    
         currentLang = lang; 
     }
 
@@ -1204,7 +1204,7 @@ def result():
                             ing_match = ing; break
                     if ing_match:
                         kr_allergy_name = ALLERGEN_MAP.get(code, code)
-                        kr_text = f"해당 음식에 들어간 <b>{ing_match}</b>(이)가 체크하신 <b>{kr_allergy_name} 알러지</b>를 유발할 수 있어요."
+                        kr_text = f"해당 음식에 들어간 <b>{ing_match}</b>(이)가 체크하신 <b>{kr_allergy_name} 알러지</b>를 유발할 수 있습니다."
                         
                         texts_to_translate.append(kr_text)
                         allergy_hits.append({"allergy": kr_allergy_name, "ing": ing_match, "kr_text": kr_text})
@@ -1212,7 +1212,7 @@ def result():
                 # 2. 회피 재료 매칭 및 한국어 문구 생성
                 for term in avoid_foods:
                     if any(term and (term in ing) for ing in ingredients):
-                        kr_text = f"해당 음식에는 선택하신 \"<b>{term}</b>\"(이)가 들어있어요."
+                        kr_text = f"해당 음식에는 선택하신 \"<b>{term}</b>\"(이)가 들어있습니다."
                         
                         texts_to_translate.append(kr_text)
                         avoid_hits.append({"term": term, "kr_text": kr_text})
