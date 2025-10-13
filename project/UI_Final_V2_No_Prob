@@ -711,11 +711,11 @@ RESULT_HTML = BASE_CSS + """
           {# 입력한 재료 포함 여부 안내 문구 #}
             {% if avoid_hits and avoid_hits|length > 0 %}
               <div class="small" style="margin-top:8px">
-                <div class="pill warn" style="display:block;margin:6px 0;" data-ko-key="no_allergy_hit">해당 음식에는 입력하신 {{ (avoid_hits | map(attribute='term') | unique | join(', ')) }}(이)가 포함되어 있습니다.
+                <div class="pill warn" style="display:block;margin:6px 0;" data-ko-key="no_allergy_hit">해당 음식에는 입력하신 {{ (avoid_hits | map(attribute='term') | unique | join(', ')) }}(이)가 들어가 있습니다.
               </div>
             {% elif any_input %}
               <div class="small" style="margin-top:8px">
-                <div class="pill ok" style="display:block;margin:6px 0;" data-ko-key="no_allergy_hit">해당 음식에는 피하고 싶은 재료가 포함되어 있지 않습니다.
+                <div class="pill ok" style="display:block;margin:6px 0;" data-ko-key="no_allergy_hit">해당 음식에는 피하고 싶은 재료가 들어가 있지 않습니다.
               </div>
             {% endif %}
         </div>
@@ -762,58 +762,54 @@ RESULT_HTML = BASE_CSS + """
   });
 
 
-  function buildAnnouncement(lang) {
-    // 음성 안내 문구를 선택된 언어(lang)에 맞춰 생성
-    const parts = [];
+    function buildAnnouncement(lang) {
+      const parts = [];
+      const foodNameText = document.getElementById('food-name-display').textContent;
     
-    // 음식 이름과 확률은 기본적으로 영어 이름/숫자를 사용
-    const foodNameText = document.getElementById('food-name-display').textContent;
-
-    if (lang === 'ko') {
-        parts.push(`예측된 음식은 ${foodNameText}입니다.`);
-    } else {
-        parts.push(`Predicted food is ${foodNameText}.`);
-    }
-
-    if (selectedAllergens.length > 0) {
-      if (allergyHits.length > 0) {
-        const hits = Array.from(document.querySelectorAll('#allergy-result-list span')).map(el => {
-             // 화면에 보이는 텍스트 (한국어 또는 영어)를 가져와서 HTML 태그 제거
-             return el.textContent.trim().replace(/<[^>]*>/g, '');
-        });
-        
-        if (lang === 'ko') {
-            parts.push(`주의. 체크한 알러지와 관련된 재료가 포함되었습니다. ${hits.join(". 그리고 ")}.`);
-        } else {
-            parts.push(`Warning. Ingredients related to your checked allergens are included. ${hits.join(". And ")}.`);
-        }
+      if (lang === 'ko') {
+          parts.push(`예측된 음식은 ${foodNameText}입니다.`);
       } else {
-        if (lang === 'ko') {
-            parts.push("체크한 알러지를 유발하는 재료는 발견되지 않았습니다.");
-        } else {
-            parts.push("Ingredients that trigger your checked allergens were not found.");
+          parts.push(`Predicted food is ${foodNameText}.`);
+      }
+    
+      if (selectedAllergens.length > 0) {
+        if (allergyHits.length > 0) {
+          const hits = Array.from(document.querySelectorAll('#allergy-result-list span'))
+            .map(el => el.textContent.trim().replace(/<[^>]*>/g, ''));
+          if (lang === 'ko') {
+              parts.push(`주의. 체크한 알러지와 관련된 재료가 들어가 있습니다. ${hits.join(". 그리고 ")}.`);
+          } else {
+              parts.push(`Warning. Ingredients related to your checked allergens are included. ${hits.join(". And ")}.`);
+          }
+     } else {
+          if (lang === 'ko') {
+              parts.push("체크한 알러지를 유발하는 재료는 발견되지 않았습니다.");
+          } else {
+              parts.push("Ingredients that trigger your checked allergens were not found.");
+          }
         }
       }
-    }
     
-    if (userEnteredAvoid) {
-      if (avoidHits.length > 0) {
-        const avoidNames = avoidHits.map(h => h.term).join(", "); // 재료 이름 자체는 번역하지 않고 그대로 사용
-        if (lang === 'ko') {
-            parts.push(`그리고 해당 음식에는 ${avoidNames}(이)가 포함되었습니다.`);
+      if (userEnteredAvoid) {
+        if (avoidHits.length > 0) {
+          const avoidNames = avoidHits.map(h => h.term).join(", ");
+          if (lang === 'ko') {
+              parts.push(`그리고 해당 음식에는 ${avoidNames}(이)가 들어가 있습니다.`);
+          } else {
+              parts.push(`${avoidNames} you wish to avoid are included.`);
+          }
         } else {
-            parts.push(`${avoidNames} you wish to avoid are included.`);
-        }
-      } else {
-        if (lang === 'ko') {
-            parts.push("그리고 해당 음식에는 피하고 싶은 재료가 포함되지 않았습니다.);
-        } else {
-            parts.push("The ingredients you entered were not included.");
+          if (lang === 'ko') {
+              parts.push("그리고 해당 음식에는 피하고 싶은 재료가 들어가가 있지 않습니다.");
+          } else {
+              parts.push("The ingredients you entered were not included.");
+          }
         }
       }
+    
+      return parts.join(" ");
     }
-    return parts.join(" ");
-  }
+
 
   // [수정] A11Y 텍스트 초기 설정 (현재 언어 기준)
   const a11yEl = document.getElementById('a11y-announce');
@@ -1169,7 +1165,7 @@ def result():
     texts_to_translate = []
     
     try:
-        tree = ET.parse("api_xml.xml")
+        tree = ET.parse("api_xml_new.xml")
         root = tree.getroot()
         data = []
         for row in root.iter("row"):
