@@ -1,0 +1,81 @@
+import os
+import time
+import requests
+from selenium import webdriver as wb
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from PIL import Image
+import io
+
+MIN_SIZE = 224  # 최소 해상도 (가로 또는 세로)
+
+def img_download():
+    driver = wb.Chrome()
+    url_image = "https://search.naver.com/search.naver?where=image"
+    driver.maximize_window()
+    driver.get(url_image)
+    time.sleep(1)
+    
+    # 사용자 입력
+    keyword = input("검색어를 입력하세요 : ").strip()
+    if not keyword:
+        print("검색어가 비어있습니다. 종료합니다.")
+        return
+    
+    # 폴더 생성
+    if not os.path.exists(keyword):
+        os.mkdir(keyword)
+    
+    # 검색
+    search = driver.find_element(By.CSS_SELECTOR, "#nx_query")
+    search.send_keys(keyword)
+    search.send_keys(Keys.ENTER)
+    time.sleep(1)
+    
+    # 스크롤 내려 이미지 로딩
+    for _ in range(20):
+        body = driver.find_element(By.CSS_SELECTOR, "body")
+        body.send_keys(Keys.END)
+        time.sleep(0.5)
+    
+    # 이미지 태그 수집
+    img_list = driver.find_elements(By.CSS_SELECTOR, "img")
+    saved_count = 0
+    
+    for i, img in enumerate(img_list):
+        try:
+            url = img.get_attribute("src")
+            if not url or url[:4] == "data":
+                continue
+
+            # 이미지 다운로드
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            image = Image.open(io.BytesIO(resp.content))
+            width, height = image.size
+
+            # 해상도 필터 적용
+            if width < MIN_SIZE or height < MIN_SIZE:
+                print(f"건너뜀: {url} (해상도 {width}x{height} < {MIN_SIZE})")
+                continue
+
+            # 저장
+            ext = image.format.lower() if image.format else "jpg"
+            if ext == "jpeg":
+                ext = "jpg"
+            file_path = f"{keyword}/{keyword}_{saved_count}.{ext}"
+            image.save(file_path)
+            saved_count += 1
+            print(f"{file_path} 저장완료 ({width}x{height})")
+            time.sleep(0.2)
+
+        except Exception as e:
+            print(f"이미지 다운로드 실패 {i}: {e}")
+            continue
+    
+    print(f"총 {saved_count}개 이미지 저장 완료!")
+    driver.close()
+
+
+if __name__ == "__main__":
+    img_download()
