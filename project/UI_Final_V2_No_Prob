@@ -69,7 +69,7 @@ ALLERGEN_ING_SYNONYMS = {
     "견과류": ["땅콩", "peanut","호두", "walnut","콩", "대두", "두유", "soybean", "soy","잣"],
     "조개": ["조개", "홍합", "바지락", "굴", "가리비", "clam", "mussel", "scallop", "oyster"],
     "복숭아": ["복숭아", "peach"],
-    "콩": ["콩", "대두", "두유", "soybean", "soy"],
+    "콩": ["콩", "대두", "두유", "두부", "soybean", "soy", "tofu"],
     "닭고기": ["닭고기", "닭", "치킨", "계육", "chicken"],
     "메밀": ["메밀", "buckwheat"],
     "쇠고기": ["쇠고기", "소고기", "소", "beef"],
@@ -106,7 +106,7 @@ ALLERGEN_ING_SYNONYMS = {
 # ===== 모델/라벨 (기존 코드 유지) =====
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def load_label_map(path="label_map.txt"):
+def load_label_map(path="food_list.txt"):
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             cls = [ln.strip() for ln in f if ln.strip()]
@@ -130,7 +130,7 @@ class DummyModel(nn.Module):
     def __init__(self, n): super().__init__(); self.n=n
     def forward(self, x): return torch.randn(x.size(0), self.n, device=x.device)
 
-def try_load_model(n, ckpt="final_model_e50_b16_lr0001_acc96.71.pt"):
+def try_load_model(n, ckpt="final_model_e47_b16_lr0001_acc99.07.pt"):
     if not os.path.exists(ckpt):
         print("[INFO] best_model.pt 없음 → DummyModel")
         return DummyModel(n).to(device), 224
@@ -1118,7 +1118,8 @@ def result():
         raw = request.files["image"].read()
         if not raw: abort(400, "빈 파일입니다.")
         try:
-            img = Image.open(io.BytesIO(raw))
+            img = Image.open(io.BytesIO(raw)).convert("RGB")  # ← convert 추가
+            token, path = save_temp_image(img)
         except Exception:
             abort(400, "이미지 열기 실패")
         token, path = save_temp_image(img)
