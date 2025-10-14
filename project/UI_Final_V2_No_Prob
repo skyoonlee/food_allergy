@@ -800,7 +800,7 @@ RESULT_HTML = BASE_CSS + """
           }
         } else {
           if (lang === 'ko') {
-              parts.push("그리고 해당 음식에는 피하고 싶은 재료가 들어가가 있지 않습니다.");
+              parts.push("그리고 해당 음식에는 피하고 싶은 재료가 들어가 있지 않습니다.");
           } else {
               parts.push("The ingredients you entered were not included.");
           }
