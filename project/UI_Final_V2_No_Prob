@@ -130,7 +130,7 @@ class DummyModel(nn.Module):
     def __init__(self, n): super().__init__(); self.n=n
     def forward(self, x): return torch.randn(x.size(0), self.n, device=x.device)
 
-def try_load_model(n, ckpt="final_model_e47_b16_lr0001_acc99.07.pt"):
+def try_load_model(n, ckpt="final_model_e47_b16_lr0001_acc99.pt"):
     if not os.path.exists(ckpt):
         print("[INFO] best_model.pt 없음 → DummyModel")
         return DummyModel(n).to(device), 224
