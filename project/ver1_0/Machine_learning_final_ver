@@ -1,0 +1,219 @@
+from google.colab import drive
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset, random_split
+from torchvision import transforms, models
+from PIL import Image
+from tqdm.notebook import tqdm
+import matplotlib.pyplot as plt
+import os
+
+drive.mount('/content/drive')
+
+data_dir = '/content/drive/MyDrive/Food_allergy/image'
+base_save_dir = '/content/drive/MyDrive/Food_allergy/results'
+os.makedirs(base_save_dir, exist_ok=True)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# 학습 설정
+num_epochs = 60
+batch_size = 32
+lr = 0.0005
+test_ratio = 0.25  # 테스트셋 비율
+
+# ------------------ 커스텀 데이터셋 ------------------
+class CustomImageDataset(Dataset):
+    def __init__(self, root_dir, transform=None):
+        self.samples = []
+        self.classes = []
+        self.class_to_idx = {}
+        self.transform = transform
+
+        for root, dirs, files in os.walk(root_dir):
+            dirs.sort()
+            if len(files) > 0:
+                class_name = os.path.basename(root)
+                if class_name not in self.class_to_idx:
+                    self.class_to_idx[class_name] = len(self.classes)
+                    self.classes.append(class_name)
+                for file in files:
+                    if file.lower().endswith(('png','jpg','jpeg','bmp')):
+                        self.samples.append((os.path.join(root, file), self.class_to_idx[class_name]))
+
+        if len(self.samples) == 0:
+            raise ValueError(f"데이터가 없습니다! {root_dir} 경로를 확인하세요.")
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+        img = Image.open(path).convert("RGB")
+        if self.transform:
+            img = self.transform(img)
+        return img, label
+
+# ------------------ 전처리 작업 ------------------
+transform = transforms.Compose([
+    transforms.Resize((224,224)),
+    transforms.RandomHorizontalFlip(), # 좌우 반전
+    transforms.RandomRotation(15),     # -15도 ~ +15도 랜덤 회전
+    transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05), # 밝기, 대비, 채도, 색조 조절
+    transforms.ToTensor(),
+    transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
+])
+
+dataset = CustomImageDataset(data_dir, transform=transform)
+train_size = int((1-test_ratio) * len(dataset))
+test_size = len(dataset) - train_size
+train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+
+num_classes = len(dataset.classes)
+print(f"클래스 매핑: {dataset.class_to_idx}")
+print(f"학습 샘플 수: {len(train_dataset)}, 테스트 샘플 수: {len(test_dataset)}")
+
+# ------------------ resnet18 학습모델 ------------------
+model = models.resnet18(pretrained=True)
+model.fc = nn.Linear(model.fc.in_features, num_classes)
+model = model.to(device)
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=lr)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode='max', factor=0.5, patience=5
+)
+
+# ------------------ 체크포인트 경로 ------------------
+checkpoint_path = os.path.join(base_save_dir, 'best_checkpoint.pth')
+
+# ------------------ 학습/평가 함수 ------------------
+def train_epoch(model, loader, optimizer, criterion, epoch):
+    model.train()
+    running_loss = 0.0
+    pbar = tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch+1}")
+    for i, (inputs, labels) in pbar:
+        inputs, labels = inputs.to(device), labels.to(device)
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+        pbar.set_postfix(loss=loss.item())
+    return running_loss / len(loader)
+
+def evaluate(model, loader, classes):
+    model.eval()
+    correct = 0
+    total = 0
+    class_correct = [0]*len(classes)
+    class_total = [0]*len(classes)
+    with torch.no_grad():
+        for inputs, labels in loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+            for i in range(len(labels)):
+                label = labels[i]
+                class_total[label] += 1
+                if preds[i] == label:
+                    class_correct[label] += 1
+    overall_acc = 100 * correct / total
+    return overall_acc, class_correct, class_total
+
+# ------------------ 학습 루프 ------------------
+loss_list, acc_list = [], []
+best_acc = 0
+
+# 기존 checkpoint 불러오기 (있으면 이어서 학습)
+start_epoch = 0
+if os.path.exists(checkpoint_path):
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    start_epoch = checkpoint['epoch'] + 1
+    best_acc = checkpoint['best_acc']
+    print(f"체크포인트 불러오기 완료. Epoch {start_epoch}, Best Accuracy {best_acc:.2f}%")
+
+for epoch in range(start_epoch, num_epochs):
+    avg_loss = train_epoch(model, train_loader, optimizer, criterion, epoch)
+    overall_acc, class_correct, class_total = evaluate(model, test_loader, dataset.classes)
+
+    loss_list.append(avg_loss)
+    acc_list.append(overall_acc)
+
+    # 최고 정확도 갱신 시 checkpoint 저장
+    if overall_acc > best_acc:
+        best_acc = overall_acc
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'best_acc': best_acc,
+            'class_to_idx': dataset.class_to_idx
+        }, checkpoint_path)
+        print(f"새로운 최고 정확도 저장: {best_acc:.2f}% (Epoch {epoch+1})")
+
+    print(f"[Epoch {epoch+1}] 평균 손실: {avg_loss:.4f}, 테스트 정확도: {overall_acc:.2f}%")
+
+    # 학습률 스케줄러 적용
+    scheduler.step(overall_acc)
+
+# ------------------ 결과 폴더 생성 ------------------
+folder_name = f"e{num_epochs}_b{batch_size}_lr{str(lr).replace('.', '')}_acc{best_acc:.0f}"
+save_dir = os.path.join(base_save_dir, folder_name)
+os.makedirs(save_dir, exist_ok=True)
+
+# ------------------ 그래프 저장 ------------------
+plt.figure(figsize=(8,5))
+plt.plot(range(1, len(loss_list)+1), loss_list, label='Loss', marker='o')
+plt.plot(range(1, len(acc_list)+1), acc_list, label='Accuracy', marker='s')
+plt.title('Training Progress')
+plt.xlabel('Epoch')
+plt.ylabel('Value')
+plt.legend()
+plt.grid(True)
+graph_path = os.path.join(save_dir, f"training_graph_{folder_name}.png")
+plt.savefig(graph_path)
+plt.close()
+print(f"학습 그래프 저장 완료: {graph_path}")
+
+# ------------------ 로그 저장 ------------------
+log_path = os.path.join(save_dir, f"epoch_accuracy_log_{folder_name}.txt")
+class_log_path = os.path.join(save_dir, f"class_accuracy_log_{folder_name}.txt")
+
+with open(log_path, 'w', encoding='utf-8') as f:
+    f.write("Epoch\tLoss\tAccuracy\n")
+    for i, (l, a) in enumerate(zip(loss_list, acc_list)):
+        f.write(f"{i+1}\t{l:.4f}\t{a:.2f}\n")
+
+with open(class_log_path, 'w', encoding='utf-8') as f:
+    f.write("최종 Epoch 클래스별 정확도\n\n")
+    _, class_correct, class_total = evaluate(model, test_loader, dataset.classes)
+    for i, cls in enumerate(dataset.classes):
+        acc = 100 * class_correct[i] / class_total[i] if class_total[i] > 0 else 0
+        f.write(f"{cls}: {acc:.2f}%\n")
+    f.write(f"{overall_acc:.2f}%")
+
+# ------------------ 모델 및 클래스 저장 ------------------
+final_model_path = os.path.join(save_dir, f"final_model_{folder_name}.pt")
+torch.save(model.state_dict(), final_model_path)
+
+class_txt_path = os.path.join(save_dir, f"class_to_idx_{folder_name}.txt")
+with open(class_txt_path, 'w', encoding='utf-8') as f:
+    for cls, idx in dataset.class_to_idx.items():
+        f.write(f"{cls}\t{idx}\n")
+
+print(f"\n 저장 완료:")
+print(f" 폴더: {save_dir}")
+print(f" 모델: {final_model_path}")
+print(f" 그래프: {graph_path}")
+print(f" 로그: {log_path}")
+print(f" 클래스별 정확도: {class_log_path}")
